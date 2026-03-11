@@ -106,7 +106,7 @@ async def delete_agent(db: AsyncSession, agent_id: str):
 
 async def set_orchestrator(db: AsyncSession, agent_id: str) -> Agent:
     # Unset current orchestrator
-    result = await db.execute(select(Agent).where(Agent.is_orchestrator == True))
+    result = await db.execute(select(Agent).where(Agent.is_orchestrator.is_(True)))
     current_orch = result.scalar_one_or_none()
     if current_orch:
         current_orch.is_orchestrator = False
@@ -119,7 +119,7 @@ async def set_orchestrator(db: AsyncSession, agent_id: str) -> Agent:
 
 
 async def get_orchestrator(db: AsyncSession) -> Agent:
-    result = await db.execute(select(Agent).where(Agent.is_orchestrator == True))
+    result = await db.execute(select(Agent).where(Agent.is_orchestrator.is_(True)))
     agent = result.scalar_one_or_none()
     if not agent:
         raise HTTPException(status_code=404, detail="No orchestrator configured")

@@ -12,7 +12,14 @@ TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
 
 @pytest_asyncio.fixture(autouse=True)
 async def reset_sse_app_status():
-    """Reset sse_starlette AppStatus event to the current event loop before each test."""
+    """Reset sse_starlette AppStatus event to the current event loop before each test.
+
+    sse_starlette initialises AppStatus.should_exit_event at import time, binding it
+    to the event loop that exists when the module is first loaded. pytest-asyncio
+    creates a fresh event loop per test function, which causes RuntimeError when the
+    SSE response tries to await the stale event. Re-creating the Event here ensures
+    it is always bound to the active loop.
+    """
     from sse_starlette.sse import AppStatus
     AppStatus.should_exit_event = asyncio.Event()
     yield
