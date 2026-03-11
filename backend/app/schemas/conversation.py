@@ -8,6 +8,10 @@ class ConversationCreate(BaseModel):
     agent_ids: List[str] = []
 
 
+class ConversationTitleUpdate(BaseModel):
+    title: str
+
+
 class ConversationResponse(BaseModel):
     id: str
     title: str

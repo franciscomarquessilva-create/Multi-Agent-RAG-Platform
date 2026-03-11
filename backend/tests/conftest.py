@@ -1,8 +1,16 @@
 import asyncio
+import os
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+
+# Set SECRET_KEY before any app imports so get_settings() caches the correct value
+os.environ.setdefault("SECRET_KEY", "dGVzdC1zZWNyZXQta2V5LWZvci11bml0LXRlc3Rpbmc=")
+
+from app.config import get_settings
+get_settings.cache_clear()
+
 from app.database import Base, get_db
 from app.main import app
 

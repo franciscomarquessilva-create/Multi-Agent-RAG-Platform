@@ -6,7 +6,7 @@ from typing import List
 from app.database import get_db
 from app.models.conversation import Conversation
 from app.models.message import Message
-from app.schemas.conversation import ConversationCreate, ConversationResponse
+from app.schemas.conversation import ConversationCreate, ConversationResponse, ConversationTitleUpdate
 from app.schemas.message import MessageResponse
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
@@ -61,13 +61,13 @@ async def delete_conversation(conversation_id: str, db: AsyncSession = Depends(g
 
 
 @router.patch("/{conversation_id}/title")
-async def update_conversation_title(conversation_id: str, data: dict, db: AsyncSession = Depends(get_db)):
+async def update_conversation_title(conversation_id: str, data: ConversationTitleUpdate, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Conversation).where(Conversation.id == conversation_id))
     conv = result.scalar_one_or_none()
     if not conv:
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Conversation not found")
-    conv.title = data.get("title", conv.title)
+    conv.title = data.title
     await db.commit()
     await db.refresh(conv)
     return ConversationResponse.from_orm_obj(conv)

@@ -13,13 +13,13 @@ def _get_fernet() -> Fernet:
     settings = get_settings()
     key = settings.secret_key
     if not key:
-        # Generate a deterministic key from a default secret for development
-        key = base64.urlsafe_b64encode(hashlib.sha256(b"dev-secret-key-change-me").digest()).decode()
-    # Fernet keys must be 32 url-safe base64 bytes
+        raise ValueError(
+            "SECRET_KEY is not configured. Set the SECRET_KEY environment variable before starting the application."
+        )
+    # Fernet keys must be 32 url-safe base64-encoded bytes; derive one if needed
     try:
         f = Fernet(key.encode())
     except Exception:
-        # Derive proper key
         derived = base64.urlsafe_b64encode(hashlib.sha256(key.encode()).digest())
         f = Fernet(derived)
     return f
