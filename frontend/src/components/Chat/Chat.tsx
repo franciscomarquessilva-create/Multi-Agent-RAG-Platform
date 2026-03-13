@@ -1,46 +1,34 @@
-import { useState, useEffect } from 'react'
 import MessageList from './MessageList'
 import InputBar from './InputBar'
-import type { ConversationWithMessages, EphemeralMessage, ChatMode, Agent } from '../../types'
+import type { ConversationWithMessages, EphemeralMessage, Agent } from '../../types'
 import { MessageSquare } from 'lucide-react'
 
 interface Props {
   conversation: ConversationWithMessages | null
   ephemeral: Record<string, EphemeralMessage>
+  processingTargets?: string[]
   streaming: boolean
   agents: Agent[]
   slaveAgents: Agent[]
-  orchestrator?: Agent
-  onSend: (content: string, mode: ChatMode, agentIds?: string[]) => void
+  onSend: (payload: { content: string; iterations?: number; broadcastInstructions?: string; orchestratorInstructions?: string }) => void
   onNewConversation: () => void
 }
 
 export default function Chat({
   conversation,
   ephemeral,
+  processingTargets = [],
   streaming,
   agents,
   slaveAgents,
-  orchestrator,
   onSend,
   onNewConversation,
 }: Props) {
-  const [mode, setMode] = useState<ChatMode>('orchestrator')
-  const [selectedAgentIds, setSelectedAgentIds] = useState<string[]>([])
+  const handleSend = (payload: { content: string; iterations?: number; broadcastInstructions?: string; orchestratorInstructions?: string }) => onSend(payload)
 
-  // Auto-select slave agents from conversation
-  useEffect(() => {
-    if (conversation) {
-      const ids = conversation.agent_ids.filter(id =>
-        slaveAgents.some(a => a.id === id)
-      )
-      setSelectedAgentIds(ids)
-    }
-  }, [conversation?.id, slaveAgents])
-
-  const handleSend = (content: string, agentIds?: string[]) => {
-    onSend(content, mode, agentIds)
-  }
+  const conversationOrchestrator = conversation
+    ? agents.find(a => a.id === conversation.orchestrator_id)
+    : undefined
 
   if (!conversation) {
     return (
@@ -66,25 +54,26 @@ export default function Chat({
       {/* Header */}
       <div className="px-4 py-3 border-b border-gray-700 bg-gray-800">
         <h3 className="font-medium text-gray-200 truncate">{conversation.title}</h3>
-        {orchestrator && (
+        {conversationOrchestrator && (
           <p className="text-xs text-gray-500">
-            Orchestrator: <span className="text-blue-400">{orchestrator.name}</span>
+            Orchestrator: <span className="text-blue-400">{conversationOrchestrator.name}</span>
             {' · '}
             {slaveAgents.length} slave agent{slaveAgents.length !== 1 ? 's' : ''}
           </p>
         )}
+        {streaming && processingTargets.length > 0 && (
+          <p className="text-xs text-amber-300 mt-1">
+            Processing: {processingTargets.join(', ')}
+          </p>
+        )}
       </div>
 
-      <MessageList messages={conversation.messages} ephemeral={ephemeral} />
+      <MessageList messages={conversation.messages} ephemeral={ephemeral} processingTargets={processingTargets} />
 
       <InputBar
-        mode={mode}
-        onModeChange={setMode}
+        orchestratorMode={conversationOrchestrator?.orchestrator_mode}
         onSend={handleSend}
         disabled={streaming}
-        slaveAgents={slaveAgents}
-        selectedAgentIds={selectedAgentIds}
-        onSelectedAgentsChange={setSelectedAgentIds}
       />
     </div>
   )

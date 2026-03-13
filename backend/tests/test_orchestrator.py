@@ -27,16 +27,50 @@ async def test_vector_store_add_search():
         mock_collection.query.assert_called_once()
 
 
+def test_agent_server_uses_session_scoped_memory():
+    from app.mcp.agent_server import AgentMCPServer
+
+    with patch("app.mcp.agent_server.search_memory", return_value=["cached"]) as search_mock, \
+         patch("app.mcp.agent_server.add_memory") as add_mock:
+        server = AgentMCPServer(
+            agent_id="agent-1",
+            agent_name="TestAgent",
+            model="gpt-4o",
+            api_key="secret",
+            session_id="conversation-123",
+        )
+
+        assert server.search_memory("hello") == ["cached"]
+        server.add_memory("remember this")
+
+    search_mock.assert_called_once_with("agent-1", "hello", 5, session_id="conversation-123")
+    add_mock.assert_called_once_with("agent-1", "remember this", None, session_id="conversation-123")
+
+
+def test_session_collection_name_stays_within_chroma_limits():
+    from app.services.vector_store import _collection_name
+
+    name = _collection_name(
+        "123e4567-e89b-12d3-a456-426614174000",
+        session_id="123e4567-e89b-12d3-a456-426614174999",
+    )
+
+    assert 3 <= len(name) <= 63
+    assert name[0].isalnum()
+    assert name[-1].isalnum()
+
+
 @pytest.mark.asyncio
 async def test_slave_broadcast_mock(client: AsyncClient):
     """Test slave broadcast mode with mocked LLM."""
     # Create orchestrator and slave agents
-    r1 = await client.post("/agents", json={"name": "Orchestrator", "model": "gpt-4o", "api_key": "k1"})
-    r2 = await client.post("/agents", json={"name": "SlaveA", "model": "gpt-4o", "api_key": "k2"})
+    r1 = await client.post("/agents", json={"name": "Orchestrator", "model": "gpt-4o", "api_key": "k1", "agent_type": "orchestrator"})
+    r2 = await client.post("/agents", json={"name": "SlaveA", "model": "gpt-4o", "api_key": "k2", "agent_type": "slave"})
+    orch_id = r1.json()["id"]
     slave_id = r2.json()["id"]
 
     # Create conversation
-    rc = await client.post("/conversations", json={"title": "Test", "agent_ids": [slave_id]})
+    rc = await client.post("/conversations", json={"title": "Test", "orchestrator_id": orch_id, "agent_ids": [slave_id]})
     conv_id = rc.json()["id"]
 
     # Mock the LLM and vector store (patch at agent_server level since it imports directly)
@@ -60,8 +94,9 @@ async def test_slave_broadcast_mock(client: AsyncClient):
 @pytest.mark.asyncio
 async def test_orchestrator_mode_mock(client: AsyncClient):
     """Test orchestrator mode with mocked LLM."""
-    await client.post("/agents", json={"name": "MainOrch", "model": "gpt-4o", "api_key": "k1"})
-    rc = await client.post("/conversations", json={"title": "Orch Test", "agent_ids": []})
+    ro = await client.post("/agents", json={"name": "MainOrch", "model": "gpt-4o", "api_key": "k1", "agent_type": "orchestrator"})
+    orch_id = ro.json()["id"]
+    rc = await client.post("/conversations", json={"title": "Orch Test", "orchestrator_id": orch_id, "agent_ids": []})
     conv_id = rc.json()["id"]
 
     async def mock_stream(*args, **kwargs):
@@ -83,3 +118,184 @@ async def test_orchestrator_mode_mock(client: AsyncClient):
             "mode": "orchestrator",
         })
         assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_chat_stream_returns_single_sse_data_prefix(client: AsyncClient):
+    ro = await client.post("/agents", json={"name": "MainOrch", "model": "gpt-4o", "api_key": "k1", "agent_type": "orchestrator"})
+    orch_id = ro.json()["id"]
+    rc = await client.post("/conversations", json={"title": "Stream Test", "orchestrator_id": orch_id, "agent_ids": []})
+    conv_id = rc.json()["id"]
+
+    async def mock_stream(*args, **kwargs):
+        yield "hello"
+
+    with patch("app.mcp.agent_server.search_memory", return_value=[]), \
+         patch("app.mcp.agent_server.add_memory"), \
+         patch("app.mcp.agent_server.AgentMCPServer.stream_response", new=mock_stream):
+        async with client.stream("POST", "/chat/send", json={
+            "conversation_id": conv_id,
+            "content": "test",
+            "mode": "orchestrator",
+        }) as resp:
+            body = ""
+            async for text in resp.aiter_text():
+                body += text
+
+    assert resp.status_code == 200
+    assert "data: data:" not in body
+    assert "data: {" in body
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_internal_messages_are_saved_as_visible_messages(client: AsyncClient):
+    ro = await client.post("/agents", json={"name": "Lead", "model": "gpt-4o", "api_key": "k1", "agent_type": "orchestrator"})
+    rs = await client.post("/agents", json={"name": "Researcher", "model": "gpt-4o", "api_key": "k2", "agent_type": "slave"})
+    orch_id = ro.json()["id"]
+    slave_id = rs.json()["id"]
+
+    await client.put(f"/agents/{orch_id}", json={
+        "allowed_slave_ids": [slave_id],
+        "orchestration_rules": [],
+    })
+
+    rc = await client.post("/conversations", json={"title": "Iterative", "orchestrator_id": orch_id, "agent_ids": [slave_id]})
+    conv_id = rc.json()["id"]
+
+    async def fake_stream_response(self, messages):
+        user_content = messages[-1]["content"]
+        if "Describe your specialisation" in user_content:
+            yield "Research and evidence synthesis"
+            return
+        if "Reply ONLY with a JSON array" in user_content:
+            yield '["Researcher"]'
+            return
+        if self.agent_name == "Researcher":
+            yield "Agent execution result"
+            return
+        yield "Final answer"
+
+    with patch("app.mcp.agent_server.search_memory", return_value=[]), \
+         patch("app.mcp.agent_server.add_memory"), \
+         patch("app.mcp.agent_server.AgentMCPServer.stream_response", new=fake_stream_response):
+        resp = await client.post("/chat/send", json={
+            "conversation_id": conv_id,
+            "content": "Discuss this topic",
+            "mode": "orchestrator",
+        })
+
+    assert resp.status_code == 200
+
+    full = await client.get(f"/conversations/{conv_id}")
+    assert full.status_code == 200
+    assistant_messages = [msg for msg in full.json()["messages"] if msg["role"] == "assistant"]
+    internal_labels = [msg["agent_name"] for msg in assistant_messages if msg["message_type"] == "internal"]
+    chat_labels = [msg["agent_name"] for msg in assistant_messages if msg["message_type"] == "chat"]
+
+    assert "Lead -> Researcher" in internal_labels
+    assert "Researcher -> Lead" in internal_labels
+    assert "Lead · Planning" in internal_labels
+    assert "Lead" in internal_labels
+    assert "Lead · Final" in chat_labels
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_reuses_cached_specialty_and_skips_redundant_discovery(client: AsyncClient):
+    ro = await client.post("/agents", json={"name": "Lead", "model": "gpt-4o", "api_key": "k1", "agent_type": "orchestrator"})
+    rs = await client.post("/agents", json={"name": "Researcher", "model": "gpt-4o", "api_key": "k2", "agent_type": "slave"})
+    orch_id = ro.json()["id"]
+    slave_id = rs.json()["id"]
+
+    await client.put(f"/agents/{orch_id}", json={
+        "allowed_slave_ids": [slave_id],
+        "orchestration_rules": [],
+    })
+
+    rc = await client.post("/conversations", json={"title": "Cached", "orchestrator_id": orch_id, "agent_ids": [slave_id]})
+    conv_id = rc.json()["id"]
+
+    def fake_search_memory(agent_id, query, n_results=5, session_id=None):
+        if "Agent specialty profile Researcher" in query:
+            return [
+                "Agent specialty profile: Researcher\nSpecialty: Research and evidence synthesis"
+            ]
+        return []
+
+    async def fake_stream_response(self, messages):
+        user_content = messages[-1]["content"]
+        if "Reply ONLY with a JSON array" in user_content:
+            yield '["Researcher"]'
+            return
+        if self.agent_name == "Researcher":
+            yield "Agent execution result"
+            return
+        yield "Final answer"
+
+    with patch("app.mcp.agent_server.search_memory", side_effect=fake_search_memory), \
+         patch("app.mcp.agent_server.add_memory") as add_memory_mock, \
+         patch("app.mcp.agent_server.AgentMCPServer.stream_response", new=fake_stream_response):
+        resp = await client.post("/chat/send", json={
+            "conversation_id": conv_id,
+            "content": "Need a researched answer",
+            "mode": "orchestrator",
+        })
+
+    assert resp.status_code == 200
+
+    full = await client.get(f"/conversations/{conv_id}")
+    assert full.status_code == 200
+    assistant_messages = [msg for msg in full.json()["messages"] if msg["role"] == "assistant"]
+    internal_labels = [msg["agent_name"] for msg in assistant_messages if msg["message_type"] == "internal"]
+
+    assert internal_labels.count("Lead -> Researcher") == 1
+    assert "Lead" in internal_labels
+    assert "Lead · Planning" in internal_labels
+    assert not any(
+        call.args and "Agent specialty profile" in call.args[0]
+        for call in add_memory_mock.call_args_list
+    )
+
+
+@pytest.mark.asyncio
+async def test_broadcast_orchestrator_separates_slave_and_private_instructions(client: AsyncClient):
+    ro = await client.post("/agents", json={"name": "Broadcaster", "model": "gpt-4o", "api_key": "k1", "agent_type": "orchestrator"})
+    rs = await client.post("/agents", json={"name": "Analyst", "model": "gpt-4o", "api_key": "k2", "agent_type": "slave"})
+    orch_id = ro.json()["id"]
+    slave_id = rs.json()["id"]
+
+    await client.put(f"/agents/{orch_id}", json={
+        "orchestrator_mode": "broadcast",
+        "allowed_slave_ids": [slave_id],
+        "orchestration_rules": [],
+    })
+
+    rc = await client.post("/conversations", json={"title": "Broadcast", "orchestrator_id": orch_id, "agent_ids": [slave_id]})
+    conv_id = rc.json()["id"]
+
+    seen_messages: list[tuple[str, str]] = []
+
+    async def fake_stream_response(self, messages):
+        seen_messages.append((self.agent_name, messages[-1]["content"]))
+        if self.agent_name == "Analyst":
+            yield "slave result"
+            return
+        yield "orchestrator result"
+
+    with patch("app.mcp.agent_server.search_memory", return_value=[]), \
+         patch("app.mcp.agent_server.add_memory"), \
+         patch("app.mcp.agent_server.AgentMCPServer.stream_response", new=fake_stream_response):
+        resp = await client.post("/chat/send", json={
+            "conversation_id": conv_id,
+            "content": "Please help with this review",
+            "broadcast_instructions": "Find issues",
+            "orchestrator_instructions": "Summarize for me",
+        })
+
+    assert resp.status_code == 200
+    analyst_prompt = next(content for agent_name, content in seen_messages if agent_name == "Analyst")
+    broadcaster_prompt = next(content for agent_name, content in seen_messages if agent_name == "Broadcaster")
+
+    assert "Find issues" in analyst_prompt
+    assert "Summarize for me" not in analyst_prompt
+    assert "Summarize for me" in broadcaster_prompt
+    assert "Find issues" in broadcaster_prompt

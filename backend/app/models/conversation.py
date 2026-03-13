@@ -1,7 +1,7 @@
 import uuid
 import json
 from datetime import datetime
-from sqlalchemy import String, DateTime, Text
+from sqlalchemy import String, DateTime, Text, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column
 from app.database import Base
 
@@ -11,6 +11,7 @@ class Conversation(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     title: Mapped[str] = mapped_column(String(200), nullable=False, default="New Conversation")
+    orchestrator_id: Mapped[str] = mapped_column(String(36), ForeignKey("agents.id", ondelete="RESTRICT"), nullable=False)
     agent_ids_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)

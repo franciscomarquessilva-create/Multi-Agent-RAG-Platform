@@ -14,6 +14,12 @@ const makeAgent = (id: string, name: string, isOrch = false): Agent => ({
   id,
   name,
   model: 'gpt-4o',
+  agent_type: isOrch ? 'orchestrator' : 'slave',
+  purpose: '',
+  instructions: '',
+  orchestrator_mode: isOrch ? 'orchestrate' : null,
+  allowed_slave_ids: [],
+  orchestration_rules: [],
   is_orchestrator: isOrch,
   created_at: new Date().toISOString(),
 })
@@ -21,6 +27,8 @@ const makeAgent = (id: string, name: string, isOrch = false): Agent => ({
 describe('AgentManager', () => {
   const defaultProps = {
     agents: [],
+    allowedModels: ['openai/gpt-4o'],
+    promptConfigs: [],
     onAgentsChanged: vi.fn(),
     onBack: vi.fn(),
   }

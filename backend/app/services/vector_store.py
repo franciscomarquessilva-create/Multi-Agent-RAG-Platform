@@ -1,4 +1,5 @@
 import os
+import hashlib
 from typing import List, Optional
 import chromadb
 from chromadb.config import Settings as ChromaSettings
@@ -21,22 +22,31 @@ def get_chroma_client() -> chromadb.ClientAPI:
     return _client
 
 
-def _collection_name(agent_id: str) -> str:
-    return f"agent_{agent_id.replace('-', '_')}"
+def _collection_name(agent_id: str, session_id: str | None = None) -> str:
+    base = f"agent_{agent_id.replace('-', '_')}"
+    if not session_id:
+        return base
+
+    # Chroma collection names must stay within a tight length budget and start/end
+    # with an alphanumeric character. Session-scoped UUID-based names can easily
+    # exceed that limit, so use compact stable hashes for session collections.
+    agent_hash = hashlib.sha1(agent_id.encode("utf-8")).hexdigest()[:12]
+    session_hash = hashlib.sha1(session_id.encode("utf-8")).hexdigest()[:12]
+    return f"ags{agent_hash}s{session_hash}"
 
 
-def get_or_create_collection(agent_id: str):
+def get_or_create_collection(agent_id: str, session_id: str | None = None):
     client = get_chroma_client()
-    name = _collection_name(agent_id)
+    name = _collection_name(agent_id, session_id)
     return client.get_or_create_collection(
         name=name,
         metadata={"hnsw:space": "cosine"},
     )
 
 
-def add_memory(agent_id: str, text: str, metadata: dict = None, doc_id: str = None):
+def add_memory(agent_id: str, text: str, metadata: dict = None, doc_id: str = None, session_id: str | None = None):
     import uuid
-    collection = get_or_create_collection(agent_id)
+    collection = get_or_create_collection(agent_id, session_id)
     if doc_id is None:
         doc_id = str(uuid.uuid4())
     collection.upsert(
@@ -46,8 +56,8 @@ def add_memory(agent_id: str, text: str, metadata: dict = None, doc_id: str = No
     )
 
 
-def search_memory(agent_id: str, query: str, n_results: int = 5) -> List[str]:
-    collection = get_or_create_collection(agent_id)
+def search_memory(agent_id: str, query: str, n_results: int = 5, session_id: str | None = None) -> List[str]:
+    collection = get_or_create_collection(agent_id, session_id)
     count = collection.count()
     if count == 0:
         return []
@@ -60,9 +70,9 @@ def search_memory(agent_id: str, query: str, n_results: int = 5) -> List[str]:
     return docs
 
 
-def delete_agent_collection(agent_id: str):
+def delete_agent_collection(agent_id: str, session_id: str | None = None):
     client = get_chroma_client()
-    name = _collection_name(agent_id)
+    name = _collection_name(agent_id, session_id)
     try:
         client.delete_collection(name)
     except Exception:

@@ -4,13 +4,25 @@ import type { Agent } from '../types'
 
 interface Props {
   agents: Agent[]
-  onConfirm: (agentIds: string[]) => void
+  onConfirm: (orchestratorId: string, agentIds: string[]) => void
   onCancel: () => void
 }
 
 export default function NewConversationModal({ agents, onConfirm, onCancel }: Props) {
-  const slaveAgents = agents.filter(a => !a.is_orchestrator)
-  const [selectedIds, setSelectedIds] = useState<string[]>(slaveAgents.map(a => a.id))
+  const orchestrators = agents.filter(a => a.agent_type === 'orchestrator')
+  const slaveAgents = agents.filter(a => a.agent_type === 'slave')
+  const [selectedOrchestratorId, setSelectedOrchestratorId] = useState<string>(orchestrators[0]?.id || '')
+
+  const defaultSlaveSelection = selectedOrchestratorId
+    ? (agents.find(a => a.id === selectedOrchestratorId)?.allowed_slave_ids || [])
+    : []
+  const [selectedIds, setSelectedIds] = useState<string[]>(defaultSlaveSelection)
+
+  const handleOrchestratorChange = (orchId: string) => {
+    setSelectedOrchestratorId(orchId)
+    const defaults = agents.find(a => a.id === orchId)?.allowed_slave_ids || []
+    setSelectedIds(defaults)
+  }
 
   const toggle = (id: string) => {
     setSelectedIds(prev =>
@@ -32,6 +44,23 @@ export default function NewConversationModal({ agents, onConfirm, onCancel }: Pr
         </div>
 
         <div className="p-4">
+          <p className="text-sm text-gray-400 mb-2">Choose orchestrator:</p>
+          {orchestrators.length === 0 ? (
+            <p className="text-sm text-red-400 mb-4">No orchestrator configured. Create one in Manage Agents.</p>
+          ) : (
+            <select
+              value={selectedOrchestratorId}
+              onChange={e => handleOrchestratorChange(e.target.value)}
+              className="input-field w-full mb-4"
+            >
+              {orchestrators.map(orch => (
+                <option key={orch.id} value={orch.id}>
+                  {orch.name} ({orch.orchestrator_mode})
+                </option>
+              ))}
+            </select>
+          )}
+
           <p className="text-sm text-gray-400 mb-3">Select slave agents to participate in this conversation:</p>
 
           {slaveAgents.length === 0 ? (
@@ -58,7 +87,8 @@ export default function NewConversationModal({ agents, onConfirm, onCancel }: Pr
 
         <div className="flex gap-2 p-4 border-t border-gray-700">
           <button
-            onClick={() => onConfirm(selectedIds)}
+            onClick={() => onConfirm(selectedOrchestratorId, selectedIds)}
+            disabled={!selectedOrchestratorId}
             className="flex-1 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-sm font-medium transition-colors"
           >
             Start Conversation

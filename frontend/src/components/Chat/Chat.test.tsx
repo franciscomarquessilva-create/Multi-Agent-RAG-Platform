@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import Chat from './Chat'
 import type { Agent } from '../../types'
 
@@ -7,6 +7,12 @@ const makeAgent = (id: string, name: string, isOrch = false): Agent => ({
   id,
   name,
   model: 'gpt-4o',
+  agent_type: isOrch ? 'orchestrator' : 'slave',
+  purpose: '',
+  instructions: '',
+  orchestrator_mode: isOrch ? 'orchestrate' : null,
+  allowed_slave_ids: [],
+  orchestration_rules: [],
   is_orchestrator: isOrch,
   created_at: new Date().toISOString(),
 })
@@ -18,7 +24,6 @@ describe('Chat', () => {
     streaming: false,
     agents: [],
     slaveAgents: [],
-    orchestrator: undefined,
     onSend: vi.fn(),
     onNewConversation: vi.fn(),
   }
@@ -28,10 +33,11 @@ describe('Chat', () => {
     expect(screen.getByText('Multi-Agent RAG')).toBeDefined()
   })
 
-  it('mode_toggle_switches', () => {
+  it('shows_orchestrator_instruction_target_label', () => {
     const conv = {
       id: '1',
       title: 'Test',
+      orchestrator_id: '1',
       agent_ids: [],
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
@@ -41,19 +47,17 @@ describe('Chat', () => {
       <Chat
         {...defaultProps}
         conversation={conv}
-        orchestrator={makeAgent('1', 'Orch', true)}
+        agents={[makeAgent('1', 'Orch', true)]}
       />
     )
-    const slaveButton = screen.getByText('Slave Agents')
-    fireEvent.click(slaveButton)
-    // After clicking, Slave Agents button should be active (green bg)
-    expect(slaveButton.className).toContain('emerald')
+    expect(screen.getByText('Instruction target: Orchestrator')).toBeDefined()
   })
 
   it('message_appears_after_send', () => {
     const conv = {
       id: '1',
       title: 'Test',
+      orchestrator_id: '1',
       agent_ids: [],
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
@@ -63,6 +67,7 @@ describe('Chat', () => {
           conversation_id: '1',
           role: 'user' as const,
           content: 'Hello world',
+          message_type: 'chat' as const,
           mode: 'orchestrator' as const,
           agent_id: null,
           agent_name: null,
@@ -72,5 +77,33 @@ describe('Chat', () => {
     }
     render(<Chat {...defaultProps} conversation={conv} />)
     expect(screen.getByText('Hello world')).toBeDefined()
+  })
+
+  it('internal_messages_render_in_collapsed_boxes', () => {
+    const conv = {
+      id: '1',
+      title: 'Internal Test',
+      orchestrator_id: '1',
+      agent_ids: [],
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      messages: [
+        {
+          id: 'm1',
+          conversation_id: '1',
+          role: 'assistant' as const,
+          content: 'Please investigate the data inconsistency.',
+          message_type: 'internal' as const,
+          mode: 'orchestrator' as const,
+          agent_id: null,
+          agent_name: 'Lead -> Researcher · Round 1',
+          created_at: new Date().toISOString(),
+        },
+      ],
+    }
+
+    const { container } = render(<Chat {...defaultProps} conversation={conv} />)
+    expect(screen.getByText('Lead -> Researcher · Round 1')).toBeDefined()
+    expect(container.querySelector('details:not([open])')).not.toBeNull()
   })
 })

@@ -1,4 +1,4 @@
-import { MessageSquare, Plus, Settings, Trash2 } from 'lucide-react'
+import { FileText, MessageSquare, Plus, Settings, SlidersHorizontal, Trash2 } from 'lucide-react'
 import type { Conversation } from '../../types'
 
 interface Props {
@@ -8,6 +8,8 @@ interface Props {
   onNewConversation: () => void
   onDeleteConversation: (id: string) => void
   onManageAgents: () => void
+  onOpenSettings: () => void
+  onOpenAudit: () => void
 }
 
 export default function Sidebar({
@@ -17,6 +19,8 @@ export default function Sidebar({
   onNewConversation,
   onDeleteConversation,
   onManageAgents,
+  onOpenSettings,
+  onOpenAudit,
 }: Props) {
   return (
     <aside className="w-64 bg-gray-800 flex flex-col border-r border-gray-700">
@@ -67,6 +71,20 @@ export default function Sidebar({
         >
           <Settings size={16} />
           Manage Agents
+        </button>
+        <button
+          onClick={onOpenSettings}
+          className="w-full mt-2 flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-gray-700 transition-colors text-sm text-gray-300"
+        >
+          <SlidersHorizontal size={16} />
+          Settings
+        </button>
+        <button
+          onClick={onOpenAudit}
+          className="w-full mt-2 flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-gray-700 transition-colors text-sm text-gray-300"
+        >
+          <FileText size={16} />
+          Audit
         </button>
       </div>
     </aside>

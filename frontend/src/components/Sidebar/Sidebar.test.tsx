@@ -6,6 +6,7 @@ import type { Conversation } from '../../types'
 const makeConv = (id: string, title: string): Conversation => ({
   id,
   title,
+  orchestrator_id: 'orch-1',
   agent_ids: [],
   created_at: new Date().toISOString(),
   updated_at: new Date().toISOString(),
@@ -18,6 +19,8 @@ describe('Sidebar', () => {
     onNewConversation: vi.fn(),
     onDeleteConversation: vi.fn(),
     onManageAgents: vi.fn(),
+    onOpenSettings: vi.fn(),
+    onOpenAudit: vi.fn(),
   }
 
   it('renders_conversations', () => {

@@ -5,23 +5,26 @@ from httpx import AsyncClient
 
 @pytest_asyncio.fixture
 async def agent_id(client: AsyncClient):
-    r = await client.post("/agents", json={"name": "Orch", "model": "gpt-4o", "api_key": "k1"})
+    r = await client.post("/agents", json={"name": "Orch", "model": "gpt-4o", "api_key": "k1", "agent_type": "orchestrator"})
     return r.json()["id"]
 
 
 @pytest.mark.asyncio
 async def test_create_conversation(client: AsyncClient, agent_id):
-    resp = await client.post("/conversations", json={"title": "My Convo", "agent_ids": [agent_id]})
+    slave = await client.post("/agents", json={"name": "S1", "model": "gpt-4o", "api_key": "k2", "agent_type": "slave"})
+    slave_id = slave.json()["id"]
+    resp = await client.post("/conversations", json={"title": "My Convo", "orchestrator_id": agent_id, "agent_ids": [slave_id]})
     assert resp.status_code == 201
     data = resp.json()
     assert data["title"] == "My Convo"
-    assert agent_id in data["agent_ids"]
+    assert data["orchestrator_id"] == agent_id
+    assert slave_id in data["agent_ids"]
 
 
 @pytest.mark.asyncio
 async def test_list_conversations(client: AsyncClient, agent_id):
-    await client.post("/conversations", json={"title": "C1", "agent_ids": []})
-    await client.post("/conversations", json={"title": "C2", "agent_ids": []})
+    await client.post("/conversations", json={"title": "C1", "orchestrator_id": agent_id, "agent_ids": []})
+    await client.post("/conversations", json={"title": "C2", "orchestrator_id": agent_id, "agent_ids": []})
     resp = await client.get("/conversations")
     assert resp.status_code == 200
     assert len(resp.json()) == 2
@@ -29,7 +32,7 @@ async def test_list_conversations(client: AsyncClient, agent_id):
 
 @pytest.mark.asyncio
 async def test_get_conversation(client: AsyncClient, agent_id):
-    r = await client.post("/conversations", json={"title": "Detail", "agent_ids": []})
+    r = await client.post("/conversations", json={"title": "Detail", "orchestrator_id": agent_id, "agent_ids": []})
     conv_id = r.json()["id"]
     resp = await client.get(f"/conversations/{conv_id}")
     assert resp.status_code == 200
@@ -39,7 +42,7 @@ async def test_get_conversation(client: AsyncClient, agent_id):
 
 @pytest.mark.asyncio
 async def test_delete_conversation(client: AsyncClient, agent_id):
-    r = await client.post("/conversations", json={"title": "ToDelete", "agent_ids": []})
+    r = await client.post("/conversations", json={"title": "ToDelete", "orchestrator_id": agent_id, "agent_ids": []})
     conv_id = r.json()["id"]
     resp = await client.delete(f"/conversations/{conv_id}")
     assert resp.status_code == 204

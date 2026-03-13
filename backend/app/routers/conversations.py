@@ -4,6 +4,7 @@ from sqlalchemy import select
 from typing import List
 
 from app.database import get_db
+from app.models.agent import Agent
 from app.models.conversation import Conversation
 from app.models.message import Message
 from app.schemas.conversation import ConversationCreate, ConversationResponse, ConversationTitleUpdate
@@ -15,9 +16,37 @@ router = APIRouter(prefix="/conversations", tags=["conversations"])
 @router.post("", status_code=201)
 async def create_conversation(data: ConversationCreate, db: AsyncSession = Depends(get_db)):
     import json
+
+    # Orchestrator must be explicitly selected and must be of orchestrator type.
+    orch_result = await db.execute(select(Agent).where(Agent.id == data.orchestrator_id))
+    orchestrator = orch_result.scalar_one_or_none()
+    if not orchestrator:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Orchestrator not found")
+    if orchestrator.agent_type != "orchestrator":
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="Only orchestrator agents can start a conversation")
+
+    # Default selection is the orchestrator's associated slaves.
+    selected_slave_ids = data.agent_ids or orchestrator.allowed_slave_ids
+
+    # Validate selected participants are slave agents.
+    if selected_slave_ids:
+        slaves_result = await db.execute(select(Agent).where(Agent.id.in_(selected_slave_ids)))
+        slave_map = {a.id: a for a in slaves_result.scalars().all()}
+        missing = [sid for sid in selected_slave_ids if sid not in slave_map]
+        if missing:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail=f"Slave agents not found: {', '.join(missing)}")
+        invalid = [a.name for a in slave_map.values() if a.agent_type != "slave"]
+        if invalid:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=400, detail=f"Only slave agents can be added: {', '.join(invalid)}")
+
     conv = Conversation(
         title=data.title or "New Conversation",
-        agent_ids_json=json.dumps(data.agent_ids),
+        orchestrator_id=orchestrator.id,
+        agent_ids_json=json.dumps(selected_slave_ids),
     )
     db.add(conv)
     await db.commit()

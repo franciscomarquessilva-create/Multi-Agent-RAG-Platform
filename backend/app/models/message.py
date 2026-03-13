@@ -12,6 +12,7 @@ class Message(Base):
     conversation_id: Mapped[str] = mapped_column(String(36), ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False)
     role: Mapped[str] = mapped_column(String(20), nullable=False)  # user / assistant / system
     content: Mapped[str] = mapped_column(Text, nullable=False)
+    message_type: Mapped[str] = mapped_column(String(20), nullable=False, default="chat")  # chat / internal
     mode: Mapped[str] = mapped_column(String(20), nullable=True)  # orchestrator / slave
     agent_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("agents.id", ondelete="SET NULL"), nullable=True)
     agent_name: Mapped[str | None] = mapped_column(String(100), nullable=True)

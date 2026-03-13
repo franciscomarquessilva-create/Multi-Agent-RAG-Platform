@@ -1,33 +1,49 @@
 import React, { useState } from 'react'
-import { Send, Users, Bot } from 'lucide-react'
-import type { ChatMode, Agent } from '../../types'
+import { Send } from 'lucide-react'
 
 interface Props {
-  mode: ChatMode
-  onModeChange: (mode: ChatMode) => void
-  onSend: (content: string, agentIds?: string[]) => void
+  orchestratorMode?: 'broadcast' | 'orchestrate' | null
+  onSend: (payload: { content: string; iterations?: number; broadcastInstructions?: string; orchestratorInstructions?: string }) => void
   disabled: boolean
-  slaveAgents: Agent[]
-  selectedAgentIds: string[]
-  onSelectedAgentsChange: (ids: string[]) => void
 }
 
 export default function InputBar({
-  mode,
-  onModeChange,
+  orchestratorMode,
   onSend,
   disabled,
-  slaveAgents,
-  selectedAgentIds,
-  onSelectedAgentsChange,
 }: Props) {
   const [text, setText] = useState('')
-  const [showAgentPicker, setShowAgentPicker] = useState(false)
+  const [broadcastText, setBroadcastText] = useState('')
+  const [orchestratorText, setOrchestratorText] = useState('')
+  const [iterations, setIterations] = useState(1)
+
+  const isBroadcast = orchestratorMode === 'broadcast'
 
   const handleSend = () => {
+    if (disabled) return
+
+    if (isBroadcast) {
+      const broadcastInstructions = broadcastText.trim()
+      const orchestratorInstructions = orchestratorText.trim()
+      if (!broadcastInstructions && !orchestratorInstructions) return
+
+      const contentParts = []
+      if (broadcastInstructions) contentParts.push(`Broadcast instructions:\n${broadcastInstructions}`)
+      if (orchestratorInstructions) contentParts.push(`Orchestrator instructions:\n${orchestratorInstructions}`)
+
+      onSend({
+        content: contentParts.join('\n\n'),
+        broadcastInstructions,
+        orchestratorInstructions,
+      })
+      setBroadcastText('')
+      setOrchestratorText('')
+      return
+    }
+
     const trimmed = text.trim()
-    if (!trimmed || disabled) return
-    onSend(trimmed, mode === 'slave' ? selectedAgentIds : undefined)
+    if (!trimmed) return
+    onSend({ content: trimmed, iterations })
     setText('')
   }
 
@@ -38,91 +54,81 @@ export default function InputBar({
     }
   }
 
-  const toggleAgent = (id: string) => {
-    onSelectedAgentsChange(
-      selectedAgentIds.includes(id)
-        ? selectedAgentIds.filter(a => a !== id)
-        : [...selectedAgentIds, id]
-    )
-  }
-
   return (
     <div className="border-t border-gray-700 px-4 py-3 bg-gray-800">
-      {/* Mode toggle */}
+      {/* Orchestrator controls */}
       <div className="flex items-center gap-2 mb-2">
-        <span className="text-xs text-gray-400">Instruction target:</span>
-        <div className="flex rounded-lg overflow-hidden border border-gray-600">
-          <button
-            onClick={() => onModeChange('orchestrator')}
-            className={`flex items-center gap-1 px-3 py-1 text-xs transition-colors ${
-              mode === 'orchestrator'
-                ? 'bg-blue-600 text-white'
-                : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
-            }`}
-          >
-            <Bot size={12} />
-            Orchestrator
-          </button>
-          <button
-            onClick={() => onModeChange('slave')}
-            className={`flex items-center gap-1 px-3 py-1 text-xs transition-colors ${
-              mode === 'slave'
-                ? 'bg-emerald-600 text-white'
-                : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
-            }`}
-          >
-            <Users size={12} />
-            Slave Agents
-          </button>
-        </div>
+        <span className="text-xs text-gray-400">Instruction target: Orchestrator</span>
 
-        {/* Agent selector for slave mode */}
-        {mode === 'slave' && slaveAgents.length > 0 && (
-          <div className="relative">
-            <button
-              onClick={() => setShowAgentPicker(p => !p)}
-              className="text-xs px-2 py-1 rounded border border-gray-600 bg-gray-700 hover:bg-gray-600 text-gray-300"
-            >
-              Agents ({selectedAgentIds.length}/{slaveAgents.length})
-            </button>
-            {showAgentPicker && (
-              <div className="absolute bottom-8 left-0 bg-gray-800 border border-gray-600 rounded-lg shadow-xl z-10 min-w-40">
-                {slaveAgents.map(agent => (
-                  <label key={agent.id} className="flex items-center gap-2 px-3 py-2 hover:bg-gray-700 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={selectedAgentIds.includes(agent.id)}
-                      onChange={() => toggleAgent(agent.id)}
-                      className="accent-emerald-500"
-                    />
-                    <span className="text-sm text-gray-200">{agent.name}</span>
-                  </label>
-                ))}
-              </div>
-            )}
+        {!isBroadcast && (
+          <div className="ml-auto flex items-center gap-2">
+          <label className="text-xs text-gray-400" htmlFor="iterations-input">Max iterations</label>
+          <input
+            id="iterations-input"
+            type="number"
+            min={1}
+            max={10}
+            value={iterations}
+            onChange={e => {
+              const next = Number.parseInt(e.target.value, 10)
+              if (Number.isNaN(next)) {
+                setIterations(1)
+                return
+              }
+              setIterations(Math.max(1, Math.min(10, next)))
+            }}
+            className="w-16 bg-gray-700 text-gray-100 rounded-lg px-2 py-1 text-xs border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
           </div>
         )}
       </div>
 
       {/* Input */}
-      <div className="flex gap-2">
-        <textarea
-          value={text}
-          onChange={e => setText(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder={
-            mode === 'orchestrator'
-              ? 'Message the orchestrator...'
-              : 'Broadcast to slave agents...'
-          }
-          disabled={disabled}
-          rows={1}
-          className="flex-1 bg-gray-700 text-gray-100 placeholder-gray-500 rounded-xl px-4 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 max-h-32 overflow-y-auto"
-          style={{ minHeight: '40px' }}
-        />
+      <div className="flex gap-2 items-end">
+        <div className="flex-1 space-y-2">
+          {isBroadcast ? (
+            <>
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">Broadcast instructions</label>
+                <textarea
+                  value={broadcastText}
+                  onChange={e => setBroadcastText(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder="Only these instructions are sent to slave agents..."
+                  disabled={disabled}
+                  rows={3}
+                  className="w-full bg-gray-700 text-gray-100 placeholder-gray-500 rounded-xl px-4 py-2 text-sm resize-y focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">Orchestrator instructions</label>
+                <textarea
+                  value={orchestratorText}
+                  onChange={e => setOrchestratorText(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder="Instructions to be followed only by the orchestrator..."
+                  disabled={disabled}
+                  rows={3}
+                  className="w-full bg-gray-700 text-gray-100 placeholder-gray-500 rounded-xl px-4 py-2 text-sm resize-y focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                />
+              </div>
+            </>
+          ) : (
+            <textarea
+              value={text}
+              onChange={e => setText(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Message orchestrator..."
+              disabled={disabled}
+              rows={1}
+              className="w-full bg-gray-700 text-gray-100 placeholder-gray-500 rounded-xl px-4 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 max-h-32 overflow-y-auto"
+              style={{ minHeight: '40px' }}
+            />
+          )}
+        </div>
         <button
           onClick={handleSend}
-          disabled={disabled || !text.trim()}
+          disabled={disabled || (isBroadcast ? (!broadcastText.trim() && !orchestratorText.trim()) : !text.trim())}
           className="p-2 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
         >
           <Send size={18} />

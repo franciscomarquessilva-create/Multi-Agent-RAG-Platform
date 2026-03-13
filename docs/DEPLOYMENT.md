@@ -5,13 +5,14 @@
 ### Local machine
 - Docker Desktop ≥ 24 **or** Docker Engine ≥ 24 + Docker Compose plugin v2
 - Git
+- OpenSSH client (`ssh`, `scp`) if deploying from Windows with `dp_remote.bat`
 
 ### Remote Linux server
 - Ubuntu 22.04 / Debian 12 (recommended)
 - Docker Engine ≥ 24
 - Docker Compose plugin v2
 - SSH access (key-based recommended)
-- Ports **3000** (frontend) and **8000** (backend API) open in the firewall
+- Ports **8000** (backend API) and the chosen frontend host port open in the firewall
 
 ## 2. Environment Variables
 
@@ -72,6 +73,16 @@ docker compose version
 ```
 
 ### 4.2 Deploy / Update
+
+For this repository on Windows, use the included helper:
+
+```bat
+dp_remote.bat
+```
+
+The script targets `francis@fraserver01`, deploys into `~/apps/multi-agent-investigation-rag`, keeps the backend `.env` if it already exists, and publishes the frontend on port `3002` to avoid the existing service already bound to `3000` on that server.
+
+Manual deployment remains available if you need a different target or want to adapt the process:
 
 ```bash
 # On your LOCAL machine — copy files to remote server
