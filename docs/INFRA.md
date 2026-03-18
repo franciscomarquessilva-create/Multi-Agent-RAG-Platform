@@ -1,12 +1,12 @@
 # Infrastructure Context: Application Gateway
 
-This document describes the self-hosted infrastructure used to expose services to the internet. Use it to understand how new Docker services should be configured for public access.
+This document describes the self-hosted infrastructure pattern used to expose services to the internet. Use it to understand how new Docker services should be configured for public access.
 
 ---
 
 ## Architecture Overview
 
-A centralized application gateway built on three components:
+A centralised application gateway built on three components:
 
 | Component | Role |
 |---|---|
@@ -19,7 +19,7 @@ A centralized application gateway built on three components:
 ```
 Internet
    ↓
-Cloudflare DNS (*.aiops3000.com)
+Cloudflare DNS (*.your-domain.com)
    ↓
 Cloudflare Tunnel (cloudflared)
    ↓
@@ -37,7 +37,7 @@ No traffic ever reaches the server's public IP directly.
 All exposed services must join the `proxy` network:
 
 ```bash
-docker network create proxy  # one-time setup, already done
+docker network create proxy  # one-time setup on the host
 ```
 
 ---
@@ -59,7 +59,7 @@ services:
       - proxy
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.myapp.rule=Host(`mrag.aiops3000.com`)"
+      - "traefik.http.routers.myapp.rule=Host(`myapp.your-domain.com`)"
       - "traefik.http.routers.myapp.entrypoints=web"
       - "traefik.http.services.myapp.loadbalancer.server.port=80"  # internal container port
 
@@ -68,7 +68,7 @@ networks:
     external: true
 ```
 
-Replace `myapp` with a unique router/service name and `80` with the port the container listens on internally.
+Replace `myapp` with a unique router/service name, `myapp.your-domain.com` with your target subdomain, and `80` with the port the container listens on internally.
 
 ### Label Breakdown
 
@@ -83,16 +83,16 @@ Replace `myapp` with a unique router/service name and `80` with the port the con
 
 ## DNS & TLS
 
-- **DNS**: A wildcard CNAME `*.example.com → <tunnel-id>.cfargotunnel.com` is already configured. No DNS changes are needed when adding new subdomains.
+- **DNS**: A wildcard CNAME `*.your-domain.com → <tunnel-id>.cfargotunnel.com` is configured once. No DNS changes are needed when adding new subdomains.
 - **TLS**: HTTPS is terminated by Cloudflare at the edge. No certificates to provision or manage inside the stack.
 
 ---
 
-## Infrastructure Stack Location
+## Infrastructure Stack
 
-The gateway stack lives at `~/infra/` on the host and is managed via Docker Compose. It runs two containers:
+The gateway stack is managed via Docker Compose and runs two containers:
 
-- `traefik` — reverse proxy, Traefik dashboard accessible at `http://fraserver01:8080/dashboard/`
+- `traefik` — reverse proxy
 - `cloudflared` — tunnel connector to Cloudflare
 
 ---
@@ -104,7 +104,7 @@ The gateway stack lives at `~/infra/` on the host and is managed via Docker Comp
 - [ ] Set the `Host(...)` rule to the target subdomain
 - [ ] Set the correct internal container port
 - [ ] Run `docker compose up -d`
-- [ ] Verify at `https://mragaiops3000.com`
+- [ ] Verify at `https://myapp.your-domain.com`
 
 No firewall rules, no DNS updates, no certificate provisioning required.
 
@@ -112,14 +112,14 @@ No firewall rules, no DNS updates, no certificate provisioning required.
 
 ## Access Control (Cloudflare Access)
 
-Cloudflare Access enforces authentication at the edge — users must log in with an approved Google account before any request reaches the server. No code changes are needed.
+Cloudflare Access enforces authentication at the edge — users must log in with an approved identity provider before any request reaches the server. No code changes are needed.
 
 ### Setup steps
 
-#### 1. Add Google as an identity provider
+#### 1. Add an identity provider (e.g. Google)
 
 1. Open **dash.cloudflare.com** → **Zero Trust** → **Settings** → **Authentication** → **Login methods** → **Add new**.
-2. Select **Google**.
+2. Select your identity provider (e.g. **Google**).
 3. Create an OAuth 2.0 client in [Google Cloud Console](https://console.cloud.google.com/apis/credentials):
    - Application type: **Web application**
    - Authorised redirect URI: `https://<your-team-name>.cloudflareaccess.com/cdn-cgi/access/callback`
@@ -135,32 +135,32 @@ Cloudflare Access enforces authentication at the edge — users must log in with
    |---|---|
    | Application name | `mrag` |
    | Session duration | `24 hours` (or your preference) |
-   | Application domain | `mrag.aiops3000.com` |
+   | Application domain | `mrag.your-domain.com` |
 4. Click **Next**.
 
 #### 3. Add an Allow policy
 
 1. Policy name: `allowed-users`
 2. Action: **Allow**
-3. Under **Include** → **Selector: Emails** → add each approved Google address, one per line.
+3. Under **Include** → **Selector: Emails** → add each approved address, one per line.
 4. Click **Next** then **Add application**.
 
 #### 4. Verify
 
-Open `https://mrag.aiops3000.com` in an incognito window. Cloudflare will redirect to a login page, allow Google sign-in, and forward to the app only if the email matches the policy.
+Open `https://mrag.your-domain.com` in an incognito window. Cloudflare will redirect to a login page and forward to the app only if the identity matches the policy.
 
 ### How it works at runtime
 
 ```
 Browser → Cloudflare DNS
-       → Cloudflare Access (Google login check)
+       → Cloudflare Access (identity login check)
        → Cloudflare Tunnel
        → Traefik → Frontend Nginx
                    ↓ /api/*
                   Backend (internal, never public)
 ```
 
-After login, Cloudflare issues a signed JWT in a cookie (`CF_Authorization`). It is **not** validated by the backend in the current setup — the app trusts Cloudflare as the gatekeeper.
+After login, Cloudflare issues a signed JWT in a cookie (`CF_Authorization`). The backend reads the `CF_TEAM_DOMAIN` environment variable: when set, it validates the JWT; when left blank (local dev), authentication falls back to `DEV_USER_EMAIL`.
 
 ### Adding or removing users
 
@@ -174,7 +174,7 @@ Zero Trust → **Access** → **Applications** → `mrag` → **Edit** → polic
 |---|---|
 | Inbound attack surface | Zero open ports — tunnel is outbound-only |
 | TLS/HTTPS | Terminated by Cloudflare at the edge |
-| Authentication | Cloudflare Access policy (Google SSO, allowlist) |
+| Authentication | Cloudflare Access policy (identity SSO, allowlist) |
 | DDoS | Cloudflare protection, default-on |
 | Container isolation | Services communicate only over the internal `proxy` network |
 | Certificate management | Not required |
@@ -186,7 +186,7 @@ Zero Trust → **Access** → **Applications** → `mrag` → **Edit** → polic
 Real-time view of all active routers, services, and middleware:
 
 ```
-http://fraserver01:8080/dashboard/
+http://<your-server>:8080/dashboard/
 ```
 
-> ⚠️ Dashboard is currently unsecured. Do not expose it externally. Protect it with a separate Cloudflare Access application or restrict it to LAN-only access.
+> ⚠️ The Traefik dashboard should not be exposed externally. Protect it with a separate Cloudflare Access application or restrict it to LAN-only access.

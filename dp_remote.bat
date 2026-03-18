@@ -3,9 +3,12 @@ setlocal EnableExtensions
 
 cd /d "%~dp0"
 
-set "SERVER=francis@fraserver01"
+:: -----------------------------------------------------------------------
+:: Configure these three variables before running the script.
+:: -----------------------------------------------------------------------
+set "SERVER=user@your-server"
 set "APP_DIR=~/apps/multi-agent-investigation-rag"
-set "FRONTEND_PORT=3002"
+set "FRONTEND_PORT=3000"
 set "DEPLOY_MODE=fast"
 
 if /I "%~1"=="--full-backend" set "DEPLOY_MODE=full-backend"
@@ -43,7 +46,7 @@ scp -r frontend/src frontend/Dockerfile frontend/index.html frontend/nginx.conf 
 if errorlevel 1 exit /b 1
 
 echo [4/5] Ensuring remote environment files...
-ssh %SERVER% "if [ ! -f %APP_DIR%/backend/.env ]; then KEY=$(python3 -c 'import base64, os; print(base64.urlsafe_b64encode(os.urandom(32)).decode())'); echo SECRET_KEY=$KEY > %APP_DIR%/backend/.env; echo DATABASE_URL=sqlite+aiosqlite:///./data/app.db >> %APP_DIR%/backend/.env; echo CHROMA_PERSIST_DIR=./data/chroma >> %APP_DIR%/backend/.env; echo BACKEND_CORS_ORIGINS=http://localhost:3000,http://localhost:5173,http://fraserver01:%FRONTEND_PORT%,http://fraserver01,https://mrag.aiops3000.com >> %APP_DIR%/backend/.env; echo CF_TEAM_DOMAIN=aiops3000 >> %APP_DIR%/backend/.env; echo ADMIN_EMAILS= >> %APP_DIR%/backend/.env; echo DEFAULT_USER_CREDITS=100 >> %APP_DIR%/backend/.env; echo DEFAULT_AGENT_LIMIT=10 >> %APP_DIR%/backend/.env; echo CREDITS_PER_ITERATION=1 >> %APP_DIR%/backend/.env; fi; echo VITE_API_BASE_URL=/api > %APP_DIR%/frontend/.env; echo FRONTEND_PORT=%FRONTEND_PORT% > %APP_DIR%/.env"
+ssh %SERVER% "if [ ! -f %APP_DIR%/backend/.env ]; then KEY=$(python3 -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'); echo SECRET_KEY=$KEY > %APP_DIR%/backend/.env; echo DATABASE_URL=sqlite+aiosqlite:///./data/app.db >> %APP_DIR%/backend/.env; echo CHROMA_PERSIST_DIR=./data/chroma >> %APP_DIR%/backend/.env; echo BACKEND_CORS_ORIGINS=http://localhost:3000,http://localhost:5173 >> %APP_DIR%/backend/.env; echo CF_TEAM_DOMAIN= >> %APP_DIR%/backend/.env; echo ADMIN_EMAILS= >> %APP_DIR%/backend/.env; echo DEFAULT_USER_CREDITS=100 >> %APP_DIR%/backend/.env; echo DEFAULT_AGENT_LIMIT=10 >> %APP_DIR%/backend/.env; echo CREDITS_PER_ITERATION=1 >> %APP_DIR%/backend/.env; fi; echo VITE_API_BASE_URL=/api > %APP_DIR%/frontend/.env; echo FRONTEND_PORT=%FRONTEND_PORT% > %APP_DIR%/.env"
 if errorlevel 1 exit /b 1
 
 if /I "%DEPLOY_MODE%"=="full-backend" (
@@ -57,8 +60,8 @@ if /I "%DEPLOY_MODE%"=="full-backend" (
 )
 
 echo Deployment complete.
-echo Frontend: http://fraserver01:%FRONTEND_PORT%
-echo Backend:  http://fraserver01:8000
+echo Frontend: http://<your-server>:%FRONTEND_PORT%
+echo Backend:  http://<your-server>:8000
 if /I "%DEPLOY_MODE%"=="fast" echo Mode: fast ^(frontend rebuild only^)
 if /I "%DEPLOY_MODE%"=="full-backend" echo Mode: full-backend ^(backend + frontend rebuild^)
 

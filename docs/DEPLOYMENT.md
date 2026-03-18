@@ -5,7 +5,7 @@
 ### Local machine
 - Docker Desktop ≥ 24 **or** Docker Engine ≥ 24 + Docker Compose plugin v2
 - Git
-- OpenSSH client (`ssh`, `scp`) if deploying from Windows with `dp_remote.bat`
+- OpenSSH client (`ssh`, `scp`) if deploying remotely from Windows with `dp_remote.bat`
 
 ### Remote Linux server
 - Ubuntu 22.04 / Debian 12 (recommended)
@@ -21,15 +21,21 @@ Copy `backend/.env.example` to `backend/.env` and fill in the values:
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `SECRET_KEY` | Fernet key for encrypting agent API keys (generate with `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`) | *required* |
-| `DATABASE_URL` | SQLAlchemy DB URL | `sqlite:///./data/app.db` |
+| `DATABASE_URL` | SQLAlchemy async DB URL | `sqlite+aiosqlite:///./data/app.db` |
 | `CHROMA_PERSIST_DIR` | ChromaDB persistence directory | `./data/chroma` |
-| `BACKEND_CORS_ORIGINS` | Comma-separated allowed origins | `http://localhost:3000` |
+| `BACKEND_CORS_ORIGINS` | Comma-separated allowed CORS origins | `http://localhost:3000,http://localhost:5173` |
+| `CF_TEAM_DOMAIN` | Cloudflare Access team name — set in production to enable JWT validation | *(blank = dev mode)* |
+| `ADMIN_EMAILS` | Comma-separated emails granted the admin role on first login | *(blank)* |
+| `DEV_USER_EMAIL` | Fallback email used in dev mode when no JWT is present | `dev@localhost` |
+| `DEFAULT_USER_CREDITS` | Credits given to new users | `100` |
+| `DEFAULT_AGENT_LIMIT` | Maximum agents per user (`-1` = unlimited) | `10` |
+| `CREDITS_PER_ITERATION` | Credits deducted per chat iteration | `1` |
 
 Copy `frontend/.env.example` to `frontend/.env`:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `VITE_API_BASE_URL` | Frontend API base URL (same-origin path) | `/api` |
+| `VITE_API_BASE_URL` | Frontend API base URL (same-origin path via reverse proxy) | `/api` |
 
 ## 3. Local Development
 
@@ -43,7 +49,7 @@ python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().d
 
 # Configure backend
 cp backend/.env.example backend/.env
-# Edit backend/.env and set SECRET_KEY
+# Edit backend/.env and set SECRET_KEY (and optionally DEV_USER_EMAIL / ADMIN_EMAILS)
 
 # Configure frontend
 cp frontend/.env.example frontend/.env
@@ -56,6 +62,11 @@ The app will be available at:
 - Frontend: http://localhost:3000
 - Backend API: http://localhost:8000
 - API docs: http://localhost:8000/docs
+
+> **Local dev authentication**: When `CF_TEAM_DOMAIN` is blank, the backend accepts any request
+> carrying an `X-Dev-User-Email` header, or falls back to `DEV_USER_EMAIL`. The first user whose
+> email appears in `ADMIN_EMAILS` is auto-promoted to admin; others start as inactive and must be
+> approved by an admin.
 
 ## 4. Remote Deployment (SSH)
 
@@ -74,15 +85,17 @@ docker compose version
 
 ### 4.2 Deploy / Update
 
-For this repository on Windows, use the included helper:
+**From Windows**, use the included helper script. Edit the three configuration variables at the
+top of `dp_remote.bat` to match your server and then run:
 
 ```bat
 dp_remote.bat
 ```
 
-The script targets `francis@fraserver01`, deploys into `~/apps/multi-agent-investigation-rag`, keeps the backend `.env` if it already exists, and publishes the frontend on port `3002` to avoid the existing service already bound to `3000` on that server.
+The script copies application sources to the server, auto-generates `backend/.env` on first run
+(preserving it on subsequent runs), and rebuilds / restarts the containers.
 
-Manual deployment remains available if you need a different target or want to adapt the process:
+For a cross-platform or manual deployment:
 
 ```bash
 # On your LOCAL machine — copy files to remote server
@@ -122,18 +135,34 @@ ssh $SERVER "
 "
 ```
 
-### 4.3 Check Status
+### 4.3 Traefik + Cloudflare Tunnel (optional public access)
 
-```bash
-ssh $SERVER "cd /opt/multi-agent-rag && docker compose ps && docker compose logs --tail=50"
+If you run Traefik and Cloudflare Tunnel on the host (see `docs/INFRA.md`), uncomment the
+`labels` block in `docker-compose.yml` and set your subdomain:
+
+```yaml
+labels:
+  - "traefik.enable=true"
+  - "traefik.docker.network=proxy"
+  - "traefik.http.routers.mrag.rule=Host(`mrag.your-domain.com`)"
+  - "traefik.http.routers.mrag.entrypoints=web"
+  - "traefik.http.services.mrag.loadbalancer.server.port=80"
 ```
 
-### 4.4 Stop / Remove
+Also set `CF_TEAM_DOMAIN` and `BACKEND_CORS_ORIGINS` in `backend/.env` accordingly.
+
+### 4.4 Check Status
 
 ```bash
-ssh $SERVER "cd /opt/multi-agent-rag && docker compose down"
+ssh $SERVER "cd $APP_DIR && docker compose ps && docker compose logs --tail=50"
+```
+
+### 4.5 Stop / Remove
+
+```bash
+ssh $SERVER "cd $APP_DIR && docker compose down"
 # To also remove volumes (data):
-ssh $SERVER "cd /opt/multi-agent-rag && docker compose down -v"
+ssh $SERVER "cd $APP_DIR && docker compose down -v"
 ```
 
 ## 5. Data Persistence
@@ -157,6 +186,6 @@ ssh $SERVER "cd $APP_DIR && docker compose up --build -d"
 ## 7. Logs
 
 ```bash
-ssh $SERVER "cd /opt/multi-agent-rag && docker compose logs -f backend"
-ssh $SERVER "cd /opt/multi-agent-rag && docker compose logs -f frontend"
+ssh $SERVER "cd $APP_DIR && docker compose logs -f backend"
+ssh $SERVER "cd $APP_DIR && docker compose logs -f frontend"
 ```
