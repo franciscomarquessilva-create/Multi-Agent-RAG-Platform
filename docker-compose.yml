@@ -30,21 +30,25 @@ services:
       - "${FRONTEND_PORT:-3000}:80"
     depends_on:
       - backend
-    networks:
-      - default
-      - proxy
 
-    labels:
-      - "traefik.enable=true"
-      - "traefik.docker.network=proxy"
-      - "traefik.http.routers.mrag.rule=Host(`mrag.aiops3000.com`)"
-      - "traefik.http.routers.mrag.entrypoints=web"
-      - "traefik.http.services.mrag.loadbalancer.server.port=80"
+    # Uncomment the networks and labels sections below to expose via Traefik + Cloudflare Tunnel.
+    # Replace <your-domain> with your actual public hostname.
+    # Also uncomment the top-level 'networks.proxy' definition at the bottom of this file.
+    # networks:
+    #   - default
+    #   - proxy
+    # labels:
+    #   - "traefik.enable=true"
+    #   - "traefik.docker.network=proxy"
+    #   - "traefik.http.routers.mrag.rule=Host(`<your-domain>`)"
+    #   - "traefik.http.routers.mrag.entrypoints=web"
+    #   - "traefik.http.services.mrag.loadbalancer.server.port=80"
 
 volumes:
   backend_data:
     driver: local
 
-networks:
-  proxy:
-    external: true
+# Uncomment the block below if using Traefik + Cloudflare Tunnel (see docs/INFRA.md).
+# networks:
+#   proxy:
+#     external: true

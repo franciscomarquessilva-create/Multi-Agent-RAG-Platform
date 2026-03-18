@@ -21,8 +21,9 @@ env/
 backend/.env
 frontend/.env
 
-# Backend data (databases, vector store)
+# Data directories (databases, vector store)
 backend/data/
+data/
 
 # Node.js
 node_modules/
