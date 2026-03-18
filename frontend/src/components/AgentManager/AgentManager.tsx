@@ -3,6 +3,8 @@ import { Plus, Trash2, Crown, ChevronLeft, Edit2, Check, X } from 'lucide-react'
 import type { Agent, AgentCreate, AgentUpdate, OrchestrationRule, PromptConfigItem } from '../../types'
 import { createAgent, updateAgent, deleteAgent } from '../../services/api'
 
+type OrchestratorMode = 'broadcast' | 'orchestrate' | 'mediator'
+
 interface Props {
   agents: Agent[]
   allowedModels: string[]
@@ -18,7 +20,7 @@ interface AgentFormData {
   agent_type: 'orchestrator' | 'slave'
   purpose: string
   instructions: string
-  orchestrator_mode: 'broadcast' | 'orchestrate'
+  orchestrator_mode: OrchestratorMode
   allowed_slave_ids: string[]
   orchestration_rules: OrchestrationRule[]
 }
@@ -125,7 +127,7 @@ export default function AgentManager({ agents, allowedModels, promptConfigs, onA
   const getDefaultPrompt = (key: string): string =>
     promptConfigs.find(p => p.key === key)?.value ?? ''
 
-  const applyOrchestratorDefaults = (data: AgentFormData, mode: 'broadcast' | 'orchestrate'): AgentFormData => ({
+  const applyOrchestratorDefaults = (data: AgentFormData, mode: OrchestratorMode): AgentFormData => ({
     ...data,
     orchestrator_mode: mode,
     purpose: getDefaultPrompt(`${mode}_default_purpose`),
@@ -318,11 +320,12 @@ export default function AgentManager({ agents, allowedModels, promptConfigs, onA
         <div className="mt-3 space-y-3 p-3 rounded-lg border border-gray-700 bg-gray-900/40">
           <select
             value={data.orchestrator_mode}
-            onChange={e => onChange(applyOrchestratorDefaults(data, e.target.value as 'broadcast' | 'orchestrate'))}
+            onChange={e => onChange(applyOrchestratorDefaults(data, e.target.value as OrchestratorMode))}
             className="input-field"
           >
             <option value="broadcast">broadcast</option>
             <option value="orchestrate">orchestrate</option>
+            <option value="mediator">mediator</option>
           </select>
 
           <div>
@@ -349,12 +352,18 @@ export default function AgentManager({ agents, allowedModels, promptConfigs, onA
             </div>
           </div>
 
-          <RuleEditor
-            rules={data.orchestration_rules}
-            allowedSlaveIds={data.allowed_slave_ids}
-            slaveAgents={slaveAgents}
-            onChange={rules => onChange({ ...data, orchestration_rules: rules })}
-          />
+          {data.orchestrator_mode === 'mediator' ? (
+            <p className="text-xs text-gray-400">
+              Mediator mode runs debates between exactly two slave agents selected when the conversation starts. Private mediator instructions stay hidden from those slaves.
+            </p>
+          ) : (
+            <RuleEditor
+              rules={data.orchestration_rules}
+              allowedSlaveIds={data.allowed_slave_ids}
+              slaveAgents={slaveAgents}
+              onChange={rules => onChange({ ...data, orchestration_rules: rules })}
+            />
+          )}
         </div>
       )}
     </>

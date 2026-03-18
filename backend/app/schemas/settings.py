@@ -7,6 +7,19 @@ class ModelOption(BaseModel):
     model: str
 
 
+class ModelOptionCreate(BaseModel):
+    provider: str
+    label: str
+    model: str
+
+
+class ModelOptionUpdate(BaseModel):
+    current_model: str
+    provider: str
+    label: str
+    model: str
+
+
 class AppSettingsResponse(BaseModel):
     allowed_models: list[str] = Field(default_factory=list)
     available_models: list[ModelOption] = Field(default_factory=list)

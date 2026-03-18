@@ -49,3 +49,25 @@ async def test_delete_conversation(client: AsyncClient, agent_id):
 
     get_resp = await client.get(f"/conversations/{conv_id}")
     assert get_resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_mediator_conversation_requires_exactly_two_slaves(client: AsyncClient):
+    orch = await client.post("/agents", json={
+        "name": "Mediator",
+        "model": "gpt-4o",
+        "api_key": "k1",
+        "agent_type": "orchestrator",
+        "orchestrator_mode": "mediator",
+    })
+    slave1 = await client.post("/agents", json={"name": "S1", "model": "gpt-4o", "api_key": "k2", "agent_type": "slave"})
+    orch_id = orch.json()["id"]
+    s1_id = slave1.json()["id"]
+
+    resp = await client.post("/conversations", json={
+        "title": "Bad Mediator Convo",
+        "orchestrator_id": orch_id,
+        "agent_ids": [s1_id],
+    })
+    assert resp.status_code == 400
+    assert "exactly two slave agents" in resp.json()["detail"]

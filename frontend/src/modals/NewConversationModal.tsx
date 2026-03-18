@@ -13,20 +13,28 @@ export default function NewConversationModal({ agents, onConfirm, onCancel }: Pr
   const slaveAgents = agents.filter(a => a.agent_type === 'slave')
   const [selectedOrchestratorId, setSelectedOrchestratorId] = useState<string>(orchestrators[0]?.id || '')
 
+  const selectedOrchestrator = agents.find(a => a.id === selectedOrchestratorId)
+  const isMediator = selectedOrchestrator?.orchestrator_mode === 'mediator'
+
   const defaultSlaveSelection = selectedOrchestratorId
-    ? (agents.find(a => a.id === selectedOrchestratorId)?.allowed_slave_ids || [])
+    ? (agents.find(a => a.id === selectedOrchestratorId)?.allowed_slave_ids || []).slice(0, isMediator ? 2 : undefined)
     : []
   const [selectedIds, setSelectedIds] = useState<string[]>(defaultSlaveSelection)
 
   const handleOrchestratorChange = (orchId: string) => {
     setSelectedOrchestratorId(orchId)
-    const defaults = agents.find(a => a.id === orchId)?.allowed_slave_ids || []
+    const isMediatorMode = agents.find(a => a.id === orchId)?.orchestrator_mode === 'mediator'
+    const defaults = (agents.find(a => a.id === orchId)?.allowed_slave_ids || []).slice(0, isMediatorMode ? 2 : undefined)
     setSelectedIds(defaults)
   }
 
   const toggle = (id: string) => {
     setSelectedIds(prev =>
-      prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
+      prev.includes(id)
+        ? prev.filter(i => i !== id)
+        : isMediator && prev.length >= 2
+          ? prev
+          : [...prev, id]
     )
   }
 
@@ -61,7 +69,11 @@ export default function NewConversationModal({ agents, onConfirm, onCancel }: Pr
             </select>
           )}
 
-          <p className="text-sm text-gray-400 mb-3">Select slave agents to participate in this conversation:</p>
+          <p className="text-sm text-gray-400 mb-3">
+            {isMediator
+              ? 'Select exactly two slave agents for the mediated discussion:'
+              : 'Select slave agents to participate in this conversation:'}
+          </p>
 
           {slaveAgents.length === 0 ? (
             <p className="text-sm text-gray-500 italic">No slave agents available. Only the orchestrator will participate.</p>
@@ -73,6 +85,7 @@ export default function NewConversationModal({ agents, onConfirm, onCancel }: Pr
                     type="checkbox"
                     checked={selectedIds.includes(agent.id)}
                     onChange={() => toggle(agent.id)}
+                    disabled={!selectedIds.includes(agent.id) && isMediator && selectedIds.length >= 2}
                     className="accent-blue-500 w-4 h-4"
                   />
                   <div>
@@ -83,12 +96,17 @@ export default function NewConversationModal({ agents, onConfirm, onCancel }: Pr
               ))}
             </div>
           )}
+          {isMediator && (
+            <p className="text-xs text-amber-300 mt-3">
+              Mediator conversations require exactly two slave agents. The mediator will decide who speaks first in each round.
+            </p>
+          )}
         </div>
 
         <div className="flex gap-2 p-4 border-t border-gray-700">
           <button
             onClick={() => onConfirm(selectedOrchestratorId, selectedIds)}
-            disabled={!selectedOrchestratorId}
+            disabled={!selectedOrchestratorId || (isMediator && selectedIds.length !== 2)}
             className="flex-1 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-sm font-medium transition-colors"
           >
             Start Conversation

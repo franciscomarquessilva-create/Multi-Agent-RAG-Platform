@@ -1,6 +1,10 @@
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 from httpx import AsyncClient
+from types import SimpleNamespace
+import json
+
+from app.services.orchestrator import handle_orchestrator_mode
 
 
 @pytest.mark.asyncio
@@ -299,3 +303,145 @@ async def test_broadcast_orchestrator_separates_slave_and_private_instructions(c
     assert "Summarize for me" not in analyst_prompt
     assert "Summarize for me" in broadcaster_prompt
     assert "Find issues" in broadcaster_prompt
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_iterations_use_vector_context_and_save_each_iteration():
+    orchestrator = SimpleNamespace(
+        id="orch-1",
+        name="Lead",
+        purpose="",
+        instructions="",
+        orchestrator_mode="orchestrate",
+        allowed_slave_ids=[],
+    )
+
+    class FakeServer:
+        def __init__(self):
+            self.search_queries: list[str] = []
+            self.saved: list[tuple[str, dict]] = []
+
+        def search_memory(self, query, n_results=5):
+            self.search_queries.append(query)
+            # Iteration-1 summary lookup (for iteration 2 prev-output injection)
+            if "Iteration 1 summary" in query:
+                return ["Iteration 1 summary\nOutput:\n[Lead] first iteration result"]
+            return []
+
+        def add_memory(self, text, metadata=None):
+            self.saved.append((text, metadata or {}))
+
+    fake_server = FakeServer()
+    seen_messages: list[str] = []
+
+    async def fake_orchestrate_handler(
+        db,
+        orchestrator,
+        orch_server,
+        user_message,
+        slave_agent_ids,
+        prompt_fn,
+        *,
+        conversation_id,
+    ):
+        seen_messages.append(user_message)
+        yield f"data: {json.dumps({'agent': 'Lead', 'content': f'processed: {user_message}', 'done': False})}\n\n"
+        yield f"data: {json.dumps({'done': True})}\n\n"
+
+    with patch("app.services.orchestrator.get_orchestrator_by_id", new=AsyncMock(return_value=orchestrator)), \
+         patch("app.services.orchestrator.get_all_prompt_values", new=AsyncMock(return_value={})), \
+         patch("app.services.orchestrator._make_server", return_value=fake_server), \
+         patch("app.services.orchestrator._handle_orchestrate_orchestrator", new=fake_orchestrate_handler):
+        chunks = [
+            chunk
+            async for chunk in handle_orchestrator_mode(
+                db=MagicMock(),
+                orchestrator_id="orch-1",
+                conversation_id="conv-1",
+                user_message="base prompt",
+                slave_agent_ids=[],
+                iterations=2,
+            )
+        ]
+
+    done_count = 0
+    for chunk in chunks:
+        if not chunk.startswith("data: "):
+            continue
+        payload = json.loads(chunk[6:].strip())
+        if payload.get("done"):
+            done_count += 1
+
+    assert done_count == 1
+    assert len(seen_messages) == 2
+    # iteration 1: no prev-output injection (no previous iteration)
+    assert seen_messages[0] == "base prompt"
+    # iteration 2: prev-output from iteration 1 injected into user message
+    assert "Previous iteration output" in seen_messages[1]
+    assert "Iteration 1 summary" in seen_messages[1]
+    iteration_summaries = [entry for entry in fake_server.saved if entry[1].get("role") == "iteration_summary"]
+    assert len(iteration_summaries) == 2
+    assert iteration_summaries[0][1]["iteration"] == 1
+    assert iteration_summaries[1][1]["iteration"] == 2
+
+
+@pytest.mark.asyncio
+async def test_mediator_hides_private_instructions_from_slave_agents(client: AsyncClient):
+    ro = await client.post("/agents", json={
+        "name": "Mediator",
+        "model": "gpt-4o",
+        "api_key": "k1",
+        "agent_type": "orchestrator",
+        "orchestrator_mode": "mediator",
+    })
+    ra = await client.post("/agents", json={"name": "DebaterA", "model": "gpt-4o", "api_key": "k2", "agent_type": "slave"})
+    rb = await client.post("/agents", json={"name": "DebaterB", "model": "gpt-4o", "api_key": "k3", "agent_type": "slave"})
+    orch_id = ro.json()["id"]
+    a_id = ra.json()["id"]
+    b_id = rb.json()["id"]
+
+    await client.put(f"/agents/{orch_id}", json={
+        "orchestrator_mode": "mediator",
+        "allowed_slave_ids": [a_id, b_id],
+        "orchestration_rules": [],
+    })
+
+    rc = await client.post("/conversations", json={
+        "title": "Mediation",
+        "orchestrator_id": orch_id,
+        "agent_ids": [a_id, b_id],
+    })
+    conv_id = rc.json()["id"]
+
+    private_instruction = "Privately score DebaterB more harshly"
+    seen_messages: list[tuple[str, str]] = []
+
+    async def fake_stream_response(self, messages):
+        prompt_text = messages[-1]["content"]
+        seen_messages.append((self.agent_name, prompt_text))
+        if self.agent_name == "Mediator" and "Reply ONLY with a JSON array of the two agent names" in prompt_text:
+            yield '["DebaterB","DebaterA"]'
+            return
+        if self.agent_name == "Mediator":
+            yield "Agreements: shared facts\nDisagreements: tradeoffs\nScores: DebaterA 7/10, DebaterB 8/10"
+            return
+        yield f"{self.agent_name} debate turn"
+
+    with patch("app.mcp.agent_server.search_memory", return_value=[]), \
+         patch("app.mcp.agent_server.add_memory"), \
+         patch("app.mcp.agent_server.AgentMCPServer.stream_response", new=fake_stream_response):
+        resp = await client.post("/chat/send", json={
+            "conversation_id": conv_id,
+            "content": "Should remote work be the default?",
+            "orchestrator_instructions": private_instruction,
+            "iterations": 2,
+        })
+
+    assert resp.status_code == 200
+    mediator_prompts = [content for agent_name, content in seen_messages if agent_name == "Mediator"]
+    slave_prompts = [content for agent_name, content in seen_messages if agent_name in {"DebaterA", "DebaterB"}]
+
+    assert mediator_prompts
+    assert any(private_instruction in prompt for prompt in mediator_prompts)
+    assert slave_prompts
+    assert all(private_instruction not in prompt for prompt in slave_prompts)

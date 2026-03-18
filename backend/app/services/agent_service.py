@@ -45,8 +45,8 @@ def _validate_agent_type(agent_type: str) -> str:
 
 def _validate_orchestrator_mode(mode: str | None) -> str:
     resolved = mode or "orchestrate"
-    if resolved not in {"broadcast", "orchestrate"}:
-        raise HTTPException(status_code=400, detail="orchestrator_mode must be 'broadcast' or 'orchestrate'")
+    if resolved not in {"broadcast", "orchestrate", "mediator"}:
+        raise HTTPException(status_code=400, detail="orchestrator_mode must be 'broadcast', 'orchestrate' or 'mediator'")
     return resolved
 
 
@@ -74,9 +74,12 @@ async def _validate_orchestrator_config(
             raise HTTPException(status_code=400, detail="Orchestration rule text cannot be empty")
 
 
-async def create_agent(db: AsyncSession, data: AgentCreate) -> Agent:
-    # Check duplicate name
-    result = await db.execute(select(Agent).where(Agent.name == data.name))
+async def create_agent(db: AsyncSession, data: AgentCreate, owner_id: str | None = None) -> Agent:
+    # Check duplicate name scoped to this owner
+    dup_q = select(Agent).where(Agent.name == data.name)
+    if owner_id:
+        dup_q = dup_q.where(Agent.owner_id == owner_id)
+    result = await db.execute(dup_q)
     if result.scalar_one_or_none():
         raise HTTPException(status_code=409, detail=f"Agent with name '{data.name}' already exists")
 
@@ -85,8 +88,9 @@ async def create_agent(db: AsyncSession, data: AgentCreate) -> Agent:
     if not await is_model_allowed(db, normalized_model):
         raise HTTPException(status_code=400, detail=f"Model '{normalized_model}' is not enabled in settings")
 
-    # Check if this is the first agent -> force orchestrator
-    result_all = await db.execute(select(Agent))
+    # Check if this is the first agent for this owner -> force orchestrator
+    first_q = select(Agent).where(Agent.owner_id == owner_id) if owner_id else select(Agent)
+    result_all = await db.execute(first_q)
     all_agents = result_all.scalars().all()
     is_first = len(all_agents) == 0
     if is_first:
@@ -104,6 +108,7 @@ async def create_agent(db: AsyncSession, data: AgentCreate) -> Agent:
         instructions=data.instructions,
         orchestrator_mode=_validate_orchestrator_mode(data.orchestrator_mode) if agent_type == "orchestrator" else "orchestrate",
         is_orchestrator=(agent_type == "orchestrator"),
+        owner_id=owner_id,
     )
     agent.allowed_slave_ids = data.allowed_slave_ids if agent_type == "orchestrator" else []
     agent.orchestration_rules = [r.model_dump() for r in data.orchestration_rules] if agent_type == "orchestrator" else []
@@ -113,8 +118,14 @@ async def create_agent(db: AsyncSession, data: AgentCreate) -> Agent:
     return agent
 
 
-async def list_agents(db: AsyncSession) -> list[Agent]:
-    result = await db.execute(select(Agent).order_by(Agent.created_at))
+async def list_agents(db: AsyncSession, actor=None) -> list[Agent]:
+    from app.models.user import User
+    if actor and isinstance(actor, User) and actor.role != "admin":
+        result = await db.execute(
+            select(Agent).where(Agent.owner_id == actor.id).order_by(Agent.created_at)
+        )
+    else:
+        result = await db.execute(select(Agent).order_by(Agent.created_at))
     return list(result.scalars().all())
 
 
@@ -129,8 +140,11 @@ async def get_agent(db: AsyncSession, agent_id: str) -> Agent:
 async def update_agent(db: AsyncSession, agent_id: str, data: AgentUpdate) -> Agent:
     agent = await get_agent(db, agent_id)
     if data.name is not None:
-        # Check duplicate
-        result = await db.execute(select(Agent).where(Agent.name == data.name, Agent.id != agent_id))
+        # Check duplicate scoped to same owner
+        dup_q = select(Agent).where(Agent.name == data.name, Agent.id != agent_id)
+        if agent.owner_id:
+            dup_q = dup_q.where(Agent.owner_id == agent.owner_id)
+        result = await db.execute(dup_q)
         if result.scalar_one_or_none():
             raise HTTPException(status_code=409, detail=f"Agent with name '{data.name}' already exists")
         agent.name = data.name

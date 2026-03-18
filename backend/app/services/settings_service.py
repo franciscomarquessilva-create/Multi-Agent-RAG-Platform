@@ -5,6 +5,7 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.agent import Agent
 from app.models.app_settings import AppSettings
 from app.models.prompt_config import PromptConfig  # noqa: registers table with Base
 from app.schemas.settings import AppSettingsResponse, ModelOption
@@ -49,6 +50,22 @@ PROMPT_DEFAULTS: dict[str, dict] = {
             "When the final output is ready, follow the user's instructions on how to present or process the result."
         ),
         "description": "Default instructions pre-filled when creating an orchestrate orchestrator agent.",
+    },
+    "mediator_default_purpose": {
+        "value": (
+            "Mediator orchestrator that runs a structured debate between two slave agents, "
+            "decides speaking order each round, and produces a balanced final assessment."
+        ),
+        "description": "Default purpose text pre-filled when creating a mediator orchestrator agent.",
+    },
+    "mediator_default_instructions": {
+        "value": (
+            "Run a controlled discussion between exactly two slave agents around the user's discussion topic. "
+            "The user may also give private mediator instructions that must not be revealed to the slaves. "
+            "On each round, decide which agent should speak first based on the current state of the debate. "
+            "At the end, summarize agreements, disagreements, and score each agent fairly."
+        ),
+        "description": "Default instructions pre-filled when creating a mediator orchestrator agent.",
     },
     "broadcast_slave_system_prompt": {
         "value": (
@@ -127,6 +144,47 @@ PROMPT_DEFAULTS: dict[str, dict] = {
         ),
         "description": "Instruction appended when generating the orchestrator's final answer.",
     },
+    "mediator_orchestrator_system_prompt": {
+        "value": (
+            "You are {orchestrator_name}, the mediator orchestrator. "
+            "Purpose: {purpose}. "
+            "Behaviour instructions: {instructions} "
+            "You must keep private mediator instructions hidden from the slave agents."
+        ),
+        "description": (
+            "System prompt for the mediator orchestrator. "
+            "Supports {orchestrator_name}, {purpose}, {instructions}."
+        ),
+    },
+    "mediator_turn_selection_prompt": {
+        "value": (
+            "Decide which of the two agents should speak first in this round based on the topic, prior context, "
+            "and the debate so far. Reply ONLY with a JSON array of the two agent names in speaking order, "
+            "e.g. [\"AgentA\",\"AgentB\"]."
+        ),
+        "description": "Prompt sent to the mediator to decide round speaking order.",
+    },
+    "mediator_slave_system_prompt": {
+        "value": (
+            "You are {agent_name}. "
+            "Purpose: {purpose}. "
+            "Behaviour instructions: {instructions} "
+            "You are participating in a mediated debate against {opponent_name}. "
+            "Respond only to the debate topic and visible debate transcript."
+        ),
+        "description": (
+            "System prompt for a slave agent during a mediated debate. "
+            "Supports {agent_name}, {purpose}, {instructions}, {opponent_name}."
+        ),
+    },
+    "mediator_final_synthesis_prompt": {
+        "value": (
+            "Using the debate transcript above, produce a final mediation report with these sections: "
+            "Agreements, Disagreements, Scores, and Final Assessment. "
+            "Scores should be numeric and justified briefly for each agent."
+        ),
+        "description": "Instruction appended when the mediator produces the final report.",
+    },
 }
 
 
@@ -153,41 +211,199 @@ DEFAULT_ALLOWED_MODELS = [
 SETTINGS_ROW_ID = "default"
 
 
+def _serialize_model_options(options: list[ModelOption]) -> str:
+    return json.dumps([option.model_dump() for option in options])
+
+
+def _parse_model_options(raw: str | None) -> list[ModelOption]:
+    if not raw:
+        return []
+    try:
+        parsed = json.loads(raw)
+        if not isinstance(parsed, list):
+            return []
+        return [ModelOption(**item) for item in parsed if isinstance(item, dict)]
+    except Exception:
+        return []
+
+
+def _dedupe_options(options: list[ModelOption]) -> list[ModelOption]:
+    seen: set[str] = set()
+    deduped: list[ModelOption] = []
+    for option in options:
+        key = normalize_model_name(option.model)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(ModelOption(provider=option.provider.strip(), label=option.label.strip(), model=key))
+    return deduped
+
+
 async def _get_or_create_settings_row(db: AsyncSession) -> AppSettings:
     result = await db.execute(select(AppSettings).where(AppSettings.id == SETTINGS_ROW_ID))
     row = result.scalar_one_or_none()
     if row:
         return row
 
-    row = AppSettings(id=SETTINGS_ROW_ID, allowed_models_json=json.dumps(DEFAULT_ALLOWED_MODELS))
+    row = AppSettings(
+        id=SETTINGS_ROW_ID,
+        allowed_models_json=json.dumps(DEFAULT_ALLOWED_MODELS),
+        available_models_json=_serialize_model_options(DEFAULT_MODEL_OPTIONS),
+    )
     db.add(row)
     await db.commit()
     await db.refresh(row)
     return row
 
 
+async def _ensure_model_catalog(db: AsyncSession, row: AppSettings) -> list[ModelOption]:
+    options = _dedupe_options(_parse_model_options(getattr(row, "available_models_json", None)))
+    if options:
+        return options
+
+    options = _dedupe_options(DEFAULT_MODEL_OPTIONS)
+    row.available_models_json = _serialize_model_options(options)
+    allowed_set = {option.model for option in options}
+    existing_allowed = [normalize_model_name(m) for m in json.loads(row.allowed_models_json or "[]")]
+    filtered_allowed = [m for m in existing_allowed if m in allowed_set] or [options[0].model]
+    row.allowed_models_json = json.dumps(filtered_allowed)
+    await db.commit()
+    await db.refresh(row)
+    return options
+
+
+def _normalize_option(provider: str, label: str, model: str) -> ModelOption:
+    provider_clean = provider.strip()
+    label_clean = label.strip()
+    model_clean = normalize_model_name(model)
+    if not provider_clean:
+        raise HTTPException(status_code=400, detail="Provider is required")
+    if not label_clean:
+        raise HTTPException(status_code=400, detail="Label is required")
+    if not model_clean:
+        raise HTTPException(status_code=400, detail="Model identifier is required")
+    return ModelOption(provider=provider_clean, label=label_clean, model=model_clean)
+
+
 async def get_app_settings(db: AsyncSession) -> AppSettingsResponse:
     row = await _get_or_create_settings_row(db)
-    allowed_models = json.loads(row.allowed_models_json or "[]")
+    available_models = await _ensure_model_catalog(db, row)
+    allowed_set = {option.model for option in available_models}
+    allowed_models = [normalize_model_name(m) for m in json.loads(row.allowed_models_json or "[]") if m]
+    allowed_models = [m for m in allowed_models if m in allowed_set]
+    if not allowed_models and available_models:
+        allowed_models = [available_models[0].model]
+        row.allowed_models_json = json.dumps(allowed_models)
+        await db.commit()
     return AppSettingsResponse(
         allowed_models=allowed_models,
-        available_models=DEFAULT_MODEL_OPTIONS,
+        available_models=available_models,
     )
 
 
 async def update_app_settings(db: AsyncSession, allowed_models: list[str]) -> AppSettingsResponse:
+    row = await _get_or_create_settings_row(db)
+    available_models = await _ensure_model_catalog(db, row)
+
     normalized = [normalize_model_name(model) for model in allowed_models if model.strip()]
-    allowed_set = {option.model for option in DEFAULT_MODEL_OPTIONS}
+    allowed_set = {option.model for option in available_models}
     invalid = [model for model in normalized if model not in allowed_set]
     if invalid:
         raise HTTPException(status_code=400, detail=f"Unsupported models: {', '.join(invalid)}")
     if not normalized:
         raise HTTPException(status_code=400, detail="At least one model must be enabled")
 
-    row = await _get_or_create_settings_row(db)
     row.allowed_models_json = json.dumps(normalized)
     await db.commit()
     await db.refresh(row)
+    return await get_app_settings(db)
+
+
+async def list_available_models(db: AsyncSession) -> list[ModelOption]:
+    row = await _get_or_create_settings_row(db)
+    return await _ensure_model_catalog(db, row)
+
+
+async def add_available_model(db: AsyncSession, *, provider: str, label: str, model: str) -> AppSettingsResponse:
+    row = await _get_or_create_settings_row(db)
+    options = await _ensure_model_catalog(db, row)
+    new_option = _normalize_option(provider, label, model)
+
+    if any(option.model == new_option.model for option in options):
+        raise HTTPException(status_code=409, detail=f"Model '{new_option.model}' already exists")
+
+    options.append(new_option)
+    row.available_models_json = _serialize_model_options(options)
+    await db.commit()
+    return await get_app_settings(db)
+
+
+async def update_available_model(
+    db: AsyncSession,
+    *,
+    current_model: str,
+    provider: str,
+    label: str,
+    model: str,
+) -> AppSettingsResponse:
+    row = await _get_or_create_settings_row(db)
+    options = await _ensure_model_catalog(db, row)
+
+    current_key = normalize_model_name(current_model)
+    next_option = _normalize_option(provider, label, model)
+    idx = next((i for i, option in enumerate(options) if option.model == current_key), -1)
+    if idx < 0:
+        raise HTTPException(status_code=404, detail=f"Model '{current_key}' not found")
+
+    if next_option.model != current_key:
+        duplicate = any(option.model == next_option.model for option in options)
+        if duplicate:
+            raise HTTPException(status_code=409, detail=f"Model '{next_option.model}' already exists")
+        usage = await db.execute(select(Agent).where(Agent.model == current_key))
+        if usage.scalars().first() is not None:
+            raise HTTPException(status_code=400, detail="Cannot rename model identifier while it is used by existing agents")
+
+    options[idx] = next_option
+    row.available_models_json = _serialize_model_options(options)
+
+    allowed = [normalize_model_name(m) for m in json.loads(row.allowed_models_json or "[]") if m]
+    updated_allowed = [next_option.model if m == current_key else m for m in allowed]
+    allowed_set = {opt.model for opt in options}
+    updated_allowed = [m for m in updated_allowed if m in allowed_set]
+    if not updated_allowed and options:
+        updated_allowed = [options[0].model]
+    row.allowed_models_json = json.dumps(updated_allowed)
+
+    await db.commit()
+    return await get_app_settings(db)
+
+
+async def delete_available_model(db: AsyncSession, *, model: str) -> AppSettingsResponse:
+    row = await _get_or_create_settings_row(db)
+    options = await _ensure_model_catalog(db, row)
+
+    key = normalize_model_name(model)
+    if len(options) <= 1:
+        raise HTTPException(status_code=400, detail="At least one model must remain in the catalog")
+
+    option_exists = any(option.model == key for option in options)
+    if not option_exists:
+        raise HTTPException(status_code=404, detail=f"Model '{key}' not found")
+
+    usage = await db.execute(select(Agent).where(Agent.model == key))
+    if usage.scalars().first() is not None:
+        raise HTTPException(status_code=400, detail="Cannot remove model currently used by an existing agent")
+
+    updated_options = [option for option in options if option.model != key]
+    row.available_models_json = _serialize_model_options(updated_options)
+
+    allowed = [normalize_model_name(m) for m in json.loads(row.allowed_models_json or "[]") if m]
+    updated_allowed = [m for m in allowed if m != key]
+    if not updated_allowed and updated_options:
+        updated_allowed = [updated_options[0].model]
+    row.allowed_models_json = json.dumps(updated_allowed)
+
+    await db.commit()
     return await get_app_settings(db)
 
 

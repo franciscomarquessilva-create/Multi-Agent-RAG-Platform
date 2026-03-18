@@ -5,7 +5,7 @@ Each agent exposes: search_memory, add_memory, generate_response.
 from typing import List, Dict, Any, AsyncIterator
 import logging
 from app.services.vector_store import search_memory, add_memory
-from app.services.llm_service import complete, stream_completion
+from app.services.llm_service import complete, stream_completion, build_request_payload_preview
 from app.database import AsyncSessionLocal
 from app.services.llm_log_service import create_llm_log
 
@@ -39,13 +39,15 @@ class AgentMCPServer:
         error: str | None = None,
     ):
         try:
+            request_payload = build_request_payload_preview(self.model, messages)
+
             async with AsyncSessionLocal() as session:
                 await create_llm_log(
                     session,
                     agent_id=self.agent_id,
                     agent_name=self.agent_name,
                     model=self.model,
-                    request_payload={"messages": messages},
+                    request_payload=request_payload,
                     response_payload={"content": response_text} if response_text is not None else None,
                     error=error,
                 )

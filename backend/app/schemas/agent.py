@@ -15,7 +15,7 @@ class AgentCreate(BaseModel):
     agent_type: str = "slave"  # orchestrator | slave
     purpose: str = ""
     instructions: str = ""
-    orchestrator_mode: Optional[str] = None  # broadcast | orchestrate
+    orchestrator_mode: Optional[str] = None  # broadcast | orchestrate | mediator
     allowed_slave_ids: list[str] = Field(default_factory=list)
     orchestration_rules: list[OrchestrationRule] = Field(default_factory=list)
 

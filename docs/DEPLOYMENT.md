@@ -12,7 +12,7 @@
 - Docker Engine ≥ 24
 - Docker Compose plugin v2
 - SSH access (key-based recommended)
-- Ports **8000** (backend API) and the chosen frontend host port open in the firewall
+- For Cloudflare Tunnel + Traefik deployments, no inbound app ports need to be opened on the server
 
 ## 2. Environment Variables
 
@@ -29,7 +29,7 @@ Copy `frontend/.env.example` to `frontend/.env`:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `VITE_API_BASE_URL` | Backend API base URL | `http://localhost:8000` |
+| `VITE_API_BASE_URL` | Frontend API base URL (same-origin path) | `/api` |
 
 ## 3. Local Development
 
@@ -110,8 +110,8 @@ ssh $SERVER "
 
   if [ ! -f frontend/.env ]; then
     cp frontend/.env.example frontend/.env
-    # Update VITE_API_BASE_URL with your server's IP/domain
-    sed -i 's|http://localhost:8000|http://your-server-ip:8000|g' frontend/.env
+    # Keep same-origin API path for reverse-proxy setups
+    sed -i 's|VITE_API_BASE_URL=.*|VITE_API_BASE_URL=/api|g' frontend/.env
   fi
 
   # Pull latest and restart

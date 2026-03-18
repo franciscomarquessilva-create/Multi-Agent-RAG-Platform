@@ -6,6 +6,11 @@ cd /d "%~dp0"
 set "SERVER=francis@fraserver01"
 set "APP_DIR=~/apps/multi-agent-investigation-rag"
 set "FRONTEND_PORT=3002"
+set "DEPLOY_MODE=fast"
+
+if /I "%~1"=="--full-backend" set "DEPLOY_MODE=full-backend"
+if /I "%~1"=="--help" goto :usage
+if /I "%~1"=="-h" goto :usage
 
 where ssh >nul 2>nul
 if errorlevel 1 (
@@ -38,15 +43,31 @@ scp -r frontend/src frontend/Dockerfile frontend/index.html frontend/nginx.conf 
 if errorlevel 1 exit /b 1
 
 echo [4/5] Ensuring remote environment files...
-ssh %SERVER% "if [ ! -f %APP_DIR%/backend/.env ]; then KEY=$(python3 -c 'import base64, os; print(base64.urlsafe_b64encode(os.urandom(32)).decode())'); echo SECRET_KEY=$KEY > %APP_DIR%/backend/.env; echo DATABASE_URL=sqlite+aiosqlite:///./data/app.db >> %APP_DIR%/backend/.env; echo CHROMA_PERSIST_DIR=./data/chroma >> %APP_DIR%/backend/.env; echo BACKEND_CORS_ORIGINS=http://localhost:3000,http://localhost:5173,http://fraserver01:%FRONTEND_PORT%,http://fraserver01 >> %APP_DIR%/backend/.env; fi; echo VITE_API_BASE_URL=http://fraserver01:8000 > %APP_DIR%/frontend/.env; echo FRONTEND_PORT=%FRONTEND_PORT% > %APP_DIR%/.env"
+ssh %SERVER% "if [ ! -f %APP_DIR%/backend/.env ]; then KEY=$(python3 -c 'import base64, os; print(base64.urlsafe_b64encode(os.urandom(32)).decode())'); echo SECRET_KEY=$KEY > %APP_DIR%/backend/.env; echo DATABASE_URL=sqlite+aiosqlite:///./data/app.db >> %APP_DIR%/backend/.env; echo CHROMA_PERSIST_DIR=./data/chroma >> %APP_DIR%/backend/.env; echo BACKEND_CORS_ORIGINS=http://localhost:3000,http://localhost:5173,http://fraserver01:%FRONTEND_PORT%,http://fraserver01,https://mrag.aiops3000.com >> %APP_DIR%/backend/.env; echo CF_TEAM_DOMAIN=aiops3000 >> %APP_DIR%/backend/.env; echo ADMIN_EMAILS= >> %APP_DIR%/backend/.env; echo DEFAULT_USER_CREDITS=100 >> %APP_DIR%/backend/.env; echo DEFAULT_AGENT_LIMIT=10 >> %APP_DIR%/backend/.env; echo CREDITS_PER_ITERATION=1 >> %APP_DIR%/backend/.env; fi; echo VITE_API_BASE_URL=/api > %APP_DIR%/frontend/.env; echo FRONTEND_PORT=%FRONTEND_PORT% > %APP_DIR%/.env"
 if errorlevel 1 exit /b 1
 
-echo [5/5] Rebuilding containers and running smoke checks...
-ssh %SERVER% "cd %APP_DIR% && docker compose up --build -d && sleep 5 && curl -fsS http://localhost:8000/health && echo && curl -fsS http://localhost:%FRONTEND_PORT% > /dev/null && docker compose ps"
-if errorlevel 1 exit /b 1
+if /I "%DEPLOY_MODE%"=="full-backend" (
+    echo [5/5] Full rebuild ^(backend + frontend^) and smoke checks...
+    ssh %SERVER% "cd %APP_DIR% && docker compose up --build -d && sleep 5 && curl -fsS http://localhost:8000/health && echo && curl -fsS http://localhost:%FRONTEND_PORT% > /dev/null && docker compose ps"
+    if errorlevel 1 exit /b 1
+) else (
+    echo [5/5] Fast deploy ^(rebuild frontend only^) and smoke checks...
+    ssh %SERVER% "cd %APP_DIR% && docker compose build frontend && docker compose up -d --no-deps frontend && sleep 5 && curl -fsS http://localhost:8000/health && echo && curl -fsS http://localhost:%FRONTEND_PORT% > /dev/null && docker compose ps"
+    if errorlevel 1 exit /b 1
+)
 
 echo Deployment complete.
 echo Frontend: http://fraserver01:%FRONTEND_PORT%
 echo Backend:  http://fraserver01:8000
+if /I "%DEPLOY_MODE%"=="fast" echo Mode: fast ^(frontend rebuild only^)
+if /I "%DEPLOY_MODE%"=="full-backend" echo Mode: full-backend ^(backend + frontend rebuild^)
 
 endlocal
+exit /b 0
+
+:usage
+echo Usage:
+echo   dp_remote.bat                ^(fast deploy: rebuild frontend only^)
+echo   dp_remote.bat --full-backend ^(full deploy: rebuild backend + frontend^)
+endlocal
+exit /b 0

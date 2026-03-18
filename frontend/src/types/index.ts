@@ -5,7 +5,7 @@ export interface Agent {
   agent_type: 'orchestrator' | 'slave'
   purpose: string
   instructions: string
-  orchestrator_mode: 'broadcast' | 'orchestrate' | null
+  orchestrator_mode: 'broadcast' | 'orchestrate' | 'mediator' | null
   allowed_slave_ids: string[]
   orchestration_rules: OrchestrationRule[]
   is_orchestrator: boolean
@@ -24,7 +24,7 @@ export interface AgentCreate {
   agent_type: 'orchestrator' | 'slave'
   purpose: string
   instructions: string
-  orchestrator_mode?: 'broadcast' | 'orchestrate'
+  orchestrator_mode?: 'broadcast' | 'orchestrate' | 'mediator'
   allowed_slave_ids: string[]
   orchestration_rules: OrchestrationRule[]
 }
@@ -36,7 +36,7 @@ export interface AgentUpdate {
   agent_type?: 'orchestrator' | 'slave'
   purpose?: string
   instructions?: string
-  orchestrator_mode?: 'broadcast' | 'orchestrate'
+  orchestrator_mode?: 'broadcast' | 'orchestrate' | 'mediator'
   allowed_slave_ids?: string[]
   orchestration_rules?: OrchestrationRule[]
 }
@@ -76,6 +76,39 @@ export interface StreamChunk {
   groupKey?: string
   isStreaming?: boolean
   processingTarget?: string
+}
+
+// --- User / Auth types ---
+
+export interface CurrentUser {
+  id: string
+  email: string
+  role: 'user' | 'admin'
+  credits: number
+  agent_limit: number  // -1 = unlimited
+  is_active: boolean
+  is_blocked: boolean
+}
+
+export interface UserSummary {
+  id: string
+  email: string
+  role: 'user' | 'admin'
+  credits: number
+  agent_limit: number
+  is_active: boolean
+  is_blocked: boolean
+  created_at: string
+  last_seen_at: string
+}
+
+export interface UserUpdate {
+  role?: 'user' | 'admin'
+  credits?: number
+  credits_delta?: number
+  agent_limit?: number
+  is_active?: boolean
+  is_blocked?: boolean
 }
 
 export interface StreamTraceEvent {

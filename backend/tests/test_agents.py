@@ -100,3 +100,16 @@ async def test_api_key_encrypted(client: AsyncClient, db_session):
     agent = result.scalar_one()
     assert agent.api_key_encrypted != plain_key
     assert plain_key not in agent.api_key_encrypted
+
+
+@pytest.mark.asyncio
+async def test_create_mediator_agent(client: AsyncClient):
+    resp = await client.post("/agents", json={
+        "name": "Mediator",
+        "model": "gpt-4o",
+        "api_key": "sk-test",
+        "agent_type": "orchestrator",
+        "orchestrator_mode": "mediator",
+    })
+    assert resp.status_code == 201
+    assert resp.json()["orchestrator_mode"] == "mediator"

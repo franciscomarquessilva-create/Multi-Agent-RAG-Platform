@@ -4,14 +4,17 @@ import Chat from './components/Chat/Chat'
 import AgentManager from './components/AgentManager/AgentManager'
 import Audit from './components/Audit/Audit'
 import Settings from './components/Settings/Settings'
+import AdminPanel from './components/Admin/AdminPanel'
 import NewConversationModal from './modals/NewConversationModal'
 import type { AppSettings, Conversation, Agent, ConversationWithMessages, Message, EphemeralMessage, PromptConfigItem } from './types'
 import { getAgents, getAppSettings, getConversations, createConversation, getConversation, deleteConversation, sendMessageStream, getPromptConfigs } from './services/api'
 import { appendClientAuditTrace } from './services/auditTrace'
+import { useAuth } from './contexts/AuthContext'
 
-type View = 'chat' | 'agents' | 'audit' | 'settings'
+type View = 'chat' | 'agents' | 'audit' | 'settings' | 'admin'
 
 export default function App() {
+  const { currentUser, isLoading, authError, impersonatingUserEmail, stopImpersonating, refreshUser } = useAuth()
   const [view, setView] = useState<View>('chat')
   const [agents, setAgents] = useState<Agent[]>([])
   const [conversations, setConversations] = useState<Conversation[]>([])
@@ -30,7 +33,7 @@ export default function App() {
     } catch (e) {
       console.error('Failed to load agents', e)
     }
-  }, [])
+  }, [impersonatingUserEmail])
 
   const loadConversations = useCallback(async () => {
     try {
@@ -39,7 +42,7 @@ export default function App() {
     } catch (e) {
       console.error('Failed to load conversations', e)
     }
-  }, [])
+  }, [impersonatingUserEmail])
 
   const loadSettings = useCallback(async () => {
     try {
@@ -65,6 +68,14 @@ export default function App() {
     loadSettings()
     loadPromptConfigs()
   }, [loadAgents, loadConversations, loadSettings, loadPromptConfigs])
+
+  // Reset active conversation when impersonation changes so we don't hold a stale reference
+  useEffect(() => {
+    setActiveConversation(null)
+    setEphemeral({})
+    setProcessingTargets([])
+    setView('chat')
+  }, [impersonatingUserEmail])
 
   const handleSelectConversation = async (conv: Conversation) => {
     try {
@@ -157,12 +168,19 @@ export default function App() {
     const conversationOrchestrator = agents.find(a => a.id === activeConversation.orchestrator_id)
     setProcessingTargets(conversationOrchestrator ? [conversationOrchestrator.name] : ['Orchestrator'])
 
+    const displayContent = conversationOrchestrator?.orchestrator_mode === 'mediator'
+      ? [
+          content.trim() ? `Discussion topic:\n${content.trim()}` : '',
+          orchestratorInstructions?.trim() ? `Mediator instructions:\n${orchestratorInstructions.trim()}` : '',
+        ].filter(Boolean).join('\n\n')
+      : content
+
     // Optimistically add user message
     const userMsg: Message = {
       id: `temp-${Date.now()}`,
       conversation_id: activeConversation.id,
       role: 'user',
-      content,
+      content: displayContent,
       message_type: 'chat',
       mode: 'orchestrator',
       agent_id: null,
@@ -264,21 +282,51 @@ export default function App() {
 
   const slaveAgents = agents.filter(a => a.agent_type === 'slave')
 
+  if (isLoading) {
+    return (
+      <div className="h-screen bg-gray-900 text-gray-100 flex items-center justify-center">
+        <p className="text-gray-300">Checking account access...</p>
+      </div>
+    )
+  }
+
+  if (!currentUser) {
+    return (
+      <div className="h-screen bg-gray-900 text-gray-100 flex items-center justify-center px-6">
+        <div className="max-w-lg w-full rounded-xl border border-gray-700 bg-gray-800/80 p-6 text-center">
+          <h1 className="text-xl font-semibold text-amber-300">Access Pending</h1>
+          <p className="mt-3 text-gray-300">
+            {authError === 'Your account is pending admin approval'
+              ? 'Your account has been registered and is waiting for admin activation.'
+              : 'Authentication is required to access this application.'}
+          </p>
+          <p className="mt-2 text-sm text-gray-400">{authError}</p>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="flex h-screen bg-gray-900 text-gray-100">
       <Sidebar
         conversations={conversations}
         activeConversationId={activeConversation?.id}
+        currentUser={currentUser}
+        impersonatingUserEmail={impersonatingUserEmail}
+        onStopImpersonating={stopImpersonating}
         onSelectConversation={handleSelectConversation}
         onNewConversation={handleNewConversation}
         onDeleteConversation={handleDeleteConversation}
         onManageAgents={() => setView('agents')}
         onOpenSettings={() => setView('settings')}
         onOpenAudit={() => setView('audit')}
+        onOpenAdmin={currentUser?.role === 'admin' ? () => setView('admin') : undefined}
       />
 
       <main className="flex-1 overflow-hidden">
-        {view === 'agents' ? (
+        {view === 'admin' ? (
+          <AdminPanel onBack={() => setView('chat')} onUserChanged={refreshUser} />
+        ) : view === 'agents' ? (
           <AgentManager
             agents={agents}
             allowedModels={settings?.allowed_models ?? []}

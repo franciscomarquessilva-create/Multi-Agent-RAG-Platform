@@ -15,6 +15,9 @@ const makeConv = (id: string, title: string): Conversation => ({
 describe('Sidebar', () => {
   const defaultProps = {
     conversations: [],
+    currentUser: null,
+    impersonatingUserEmail: null,
+    onStopImpersonating: vi.fn(),
     onSelectConversation: vi.fn(),
     onNewConversation: vi.fn(),
     onDeleteConversation: vi.fn(),

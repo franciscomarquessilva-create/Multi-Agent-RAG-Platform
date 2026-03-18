@@ -1,4 +1,5 @@
 import os
+import json
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
@@ -71,6 +72,56 @@ async def init_db():
 
             if "message_type" not in table_cols["messages"]:
                 await conn.execute(text("ALTER TABLE messages ADD COLUMN message_type VARCHAR(20) NOT NULL DEFAULT 'chat'"))
+
+            app_settings_cols_result = await conn.execute(text("PRAGMA table_info(app_settings)"))
+            app_settings_cols = {row[1] for row in app_settings_cols_result.fetchall()}
+            if app_settings_cols and "available_models_json" not in app_settings_cols:
+                await conn.execute(text("ALTER TABLE app_settings ADD COLUMN available_models_json TEXT NOT NULL DEFAULT '[]'"))
+
+            default_models_payload = json.dumps([
+                {"provider": "OpenAI", "label": "GPT-5.2", "model": "openai/gpt-5.2"},
+                {"provider": "OpenAI", "label": "GPT-5.1", "model": "openai/gpt-5.1"},
+                {"provider": "OpenAI", "label": "GPT-4o", "model": "openai/gpt-4o"},
+                {"provider": "Anthropic", "label": "Claude 3.7 Sonnet", "model": "anthropic/claude-3-7-sonnet"},
+                {"provider": "Anthropic", "label": "Claude 3.5 Sonnet", "model": "anthropic/claude-3-5-sonnet"},
+                {"provider": "Anthropic", "label": "Claude 3.5 Haiku", "model": "anthropic/claude-3-5-haiku"},
+                {"provider": "Gemini", "label": "Gemini 2.0 Flash", "model": "gemini/gemini-2.0-flash"},
+                {"provider": "Gemini", "label": "Gemini 1.5 Pro", "model": "gemini/gemini-1.5-pro"},
+                {"provider": "Gemini", "label": "Gemini 1.5 Flash", "model": "gemini/gemini-1.5-flash"},
+                {"provider": "Grok", "label": "Grok 2", "model": "xai/grok-2"},
+                {"provider": "Grok", "label": "Grok 2 Latest", "model": "xai/grok-2-latest"},
+            ])
+            if app_settings_cols:
+                await conn.execute(
+                    text("UPDATE app_settings SET available_models_json = :models WHERE available_models_json IS NULL OR TRIM(available_models_json) = '' OR available_models_json = '[]'"),
+                    {"models": default_models_payload},
+                )
+
+            # --- Users table (new) ---
+            users_info = await conn.execute(text("PRAGMA table_info(users)"))
+            users_cols = {row[1] for row in users_info.fetchall()}
+            # Table is created by create_all above on first run; the PRAGMA check guards column migrations only.
+            if users_cols and "agent_limit" not in users_cols:
+                await conn.execute(text("ALTER TABLE users ADD COLUMN agent_limit INTEGER NOT NULL DEFAULT 10"))
+            if users_cols and "is_active" not in users_cols:
+                await conn.execute(text("ALTER TABLE users ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT 1"))
+            if users_cols and "last_seen_at" not in users_cols:
+                await conn.execute(text("ALTER TABLE users ADD COLUMN last_seen_at DATETIME"))
+
+            # --- owner_id on agents ---
+            if "owner_id" not in table_cols["agents"]:
+                await conn.execute(text("ALTER TABLE agents ADD COLUMN owner_id VARCHAR(36) REFERENCES users(id) ON DELETE SET NULL"))
+
+            # --- owner_id on conversations ---
+            if "owner_id" not in table_cols.get("conversations", set()):
+                conv_info = await conn.execute(text("PRAGMA table_info(conversations)"))
+                conv_cols = {row[1] for row in conv_info.fetchall()}
+                if "owner_id" not in conv_cols:
+                    await conn.execute(text("ALTER TABLE conversations ADD COLUMN owner_id VARCHAR(36) REFERENCES users(id) ON DELETE SET NULL"))
+
+            # Remove unique constraint on agent name (now namespaced per user).
+            # SQLite does not support DROP INDEX directly from ALTER TABLE; recreate table approach is too risky.
+            # Instead, the application-layer uniqueness check accounts for owner_id scope.
 
             # Integrity repair for old data: conversations can still have NULL/orphan orchestrator IDs.
             fallback_result = await conn.execute(

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -12,12 +12,23 @@ from app.models.conversation import Conversation
 from app.models.message import Message
 from app.schemas.message import ChatRequest
 from app.services.orchestrator import handle_orchestrator_mode
+from app.services.auth_service import require_auth
+from app.services.user_service import deduct_credits
+from app.config import get_settings
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 logger = logging.getLogger(__name__)
 
 
 def _compose_user_content(data: ChatRequest, orchestrator_mode: str | None) -> str:
+    if orchestrator_mode == "mediator":
+        parts: list[str] = []
+        if data.content.strip():
+            parts.append(f"Discussion topic:\n{data.content.strip()}")
+        if (data.orchestrator_instructions or "").strip():
+            parts.append(f"Mediator instructions:\n{data.orchestrator_instructions.strip()}")
+        return "\n\n".join(parts) if parts else data.content
+
     if orchestrator_mode != "broadcast":
         return data.content
 
@@ -30,6 +41,9 @@ def _compose_user_content(data: ChatRequest, orchestrator_mode: str | None) -> s
 
 
 def _conversation_title_source(data: ChatRequest, orchestrator_mode: str | None) -> str:
+    if orchestrator_mode == "mediator":
+        return data.content.strip() or (data.orchestrator_instructions or "").strip() or data.content
+
     if orchestrator_mode == "broadcast":
         return (
             (data.orchestrator_instructions or "").strip()
@@ -41,12 +55,20 @@ def _conversation_title_source(data: ChatRequest, orchestrator_mode: str | None)
 
 @router.post("/send")
 async def send_message(request: Request, data: ChatRequest, db: AsyncSession = Depends(get_db)):
+    # Authenticate and check conversation ownership
+    actor = await require_auth(request, db)
+
     # Validate conversation exists
     result = await db.execute(select(Conversation).where(Conversation.id == data.conversation_id))
     conv = result.scalar_one_or_none()
     if not conv:
-        from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Conversation not found")
+    if actor.role != "admin" and conv.owner_id != actor.id:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    # Deduct credits before processing (admin exempt)
+    cost = data.iterations * get_settings().credits_per_iteration
+    await deduct_credits(db, actor, cost)
 
     orchestrator = None
     if conv.orchestrator_id:

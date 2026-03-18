@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ChevronLeft, Save } from 'lucide-react'
+import { ChevronLeft, Pencil, Save, Trash2, X } from 'lucide-react'
 import type { AppSettings, ModelOption, PromptConfigItem } from '../../types'
-import { updateAppSettings, updatePromptConfig } from '../../services/api'
+import { addSettingsModel, deleteSettingsModel, updateAppSettings, updatePromptConfig, updateSettingsModel } from '../../services/api'
 
 interface Props {
   settings: AppSettings | null
@@ -18,6 +18,17 @@ export default function Settings({ settings, promptConfigs, onBack, onSettingsCh
   const [selected, setSelected] = useState<string[]>(settings?.allowed_models ?? [])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [catalogError, setCatalogError] = useState<string | null>(null)
+  const [catalogSaving, setCatalogSaving] = useState(false)
+
+  const [newModelProvider, setNewModelProvider] = useState('OpenAI')
+  const [newModelLabel, setNewModelLabel] = useState('')
+  const [newModelId, setNewModelId] = useState('')
+
+  const [editingModel, setEditingModel] = useState<string | null>(null)
+  const [editProvider, setEditProvider] = useState('')
+  const [editLabel, setEditLabel] = useState('')
+  const [editModelId, setEditModelId] = useState('')
 
   // Prompt config state
   const [promptDraft, setPromptDraft] = useState<Record<string, string>>({})
@@ -49,6 +60,79 @@ export default function Settings({ settings, promptConfigs, onBack, onSettingsCh
 
   const toggleModel = (model: string) => {
     setSelected(prev => prev.includes(model) ? prev.filter(item => item !== model) : [...prev, model])
+  }
+
+  const startEditModel = (option: ModelOption) => {
+    setEditingModel(option.model)
+    setEditProvider(option.provider)
+    setEditLabel(option.label)
+    setEditModelId(option.model)
+    setCatalogError(null)
+  }
+
+  const cancelEditModel = () => {
+    setEditingModel(null)
+    setEditProvider('')
+    setEditLabel('')
+    setEditModelId('')
+  }
+
+  const handleAddModel = async () => {
+    setCatalogSaving(true)
+    setCatalogError(null)
+    try {
+      const updated = await addSettingsModel({
+        provider: newModelProvider,
+        label: newModelLabel,
+        model: newModelId,
+      })
+      onSettingsChanged(updated)
+      setSelected(updated.allowed_models)
+      setNewModelLabel('')
+      setNewModelId('')
+    } catch (err: unknown) {
+      setCatalogError(err instanceof Error ? err.message : 'Failed to add model')
+    } finally {
+      setCatalogSaving(false)
+    }
+  }
+
+  const handleUpdateModel = async () => {
+    if (!editingModel) return
+    setCatalogSaving(true)
+    setCatalogError(null)
+    try {
+      const updated = await updateSettingsModel({
+        current_model: editingModel,
+        provider: editProvider,
+        label: editLabel,
+        model: editModelId,
+      })
+      onSettingsChanged(updated)
+      setSelected(updated.allowed_models)
+      cancelEditModel()
+    } catch (err: unknown) {
+      setCatalogError(err instanceof Error ? err.message : 'Failed to update model')
+    } finally {
+      setCatalogSaving(false)
+    }
+  }
+
+  const handleDeleteModel = async (model: string) => {
+    setCatalogSaving(true)
+    setCatalogError(null)
+    try {
+      const updated = await deleteSettingsModel(model)
+      onSettingsChanged(updated)
+      setSelected(updated.allowed_models)
+      if (editingModel === model) {
+        cancelEditModel()
+      }
+    } catch (err: unknown) {
+      setCatalogError(err instanceof Error ? err.message : 'Failed to delete model')
+    } finally {
+      setCatalogSaving(false)
+    }
   }
 
   const handleSave = async () => {
@@ -103,10 +187,103 @@ export default function Settings({ settings, promptConfigs, onBack, onSettingsCh
       </div>
 
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
+        <div className="rounded-xl border border-gray-700 bg-gray-800 p-4">
+          <h3 className="text-sm font-semibold text-gray-200">Model Catalog</h3>
+          <p className="text-sm text-gray-400 mt-1">
+            Add, edit, or remove model definitions. After that, enable the models below for agent usage.
+          </p>
+
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-2 mt-4">
+            <input
+              value={newModelProvider}
+              onChange={e => setNewModelProvider(e.target.value)}
+              placeholder="Provider (e.g. OpenAI)"
+              className="input-field"
+            />
+            <input
+              value={newModelLabel}
+              onChange={e => setNewModelLabel(e.target.value)}
+              placeholder="Label (e.g. GPT-4.1 Mini)"
+              className="input-field"
+            />
+            <input
+              value={newModelId}
+              onChange={e => setNewModelId(e.target.value)}
+              placeholder="Model ID (e.g. openai/gpt-4.1-mini)"
+              className="input-field"
+            />
+            <button
+              onClick={handleAddModel}
+              disabled={catalogSaving || !newModelProvider.trim() || !newModelLabel.trim() || !newModelId.trim()}
+              className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 rounded-lg text-sm disabled:opacity-50"
+            >
+              Add Model
+            </button>
+          </div>
+
+          {catalogError && (
+            <div className="p-3 rounded-lg border border-red-700 bg-red-900/40 text-sm text-red-200 mt-3">
+              {catalogError}
+            </div>
+          )}
+
+          <div className="space-y-2 mt-4">
+            {(settings?.available_models ?? []).map(option => (
+              <div key={option.model} className="rounded-lg border border-gray-700 bg-gray-900/40 p-3">
+                {editingModel === option.model ? (
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
+                    <input value={editProvider} onChange={e => setEditProvider(e.target.value)} className="input-field" />
+                    <input value={editLabel} onChange={e => setEditLabel(e.target.value)} className="input-field" />
+                    <input value={editModelId} onChange={e => setEditModelId(e.target.value)} className="input-field" />
+                    <div className="flex gap-2">
+                      <button
+                        onClick={handleUpdateModel}
+                        disabled={catalogSaving || !editProvider.trim() || !editLabel.trim() || !editModelId.trim()}
+                        className="flex-1 px-3 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-xs disabled:opacity-50"
+                      >
+                        Save
+                      </button>
+                      <button
+                        onClick={cancelEditModel}
+                        className="px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-xs"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-start gap-3">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm text-gray-100">{option.label}</p>
+                      <p className="text-xs text-gray-400">{option.provider}</p>
+                      <p className="text-xs text-gray-500 font-mono break-all">{option.model}</p>
+                    </div>
+                    <button
+                      onClick={() => startEditModel(option)}
+                      className="p-2 rounded hover:bg-gray-700 text-gray-300"
+                      title="Edit model"
+                    >
+                      <Pencil size={14} />
+                    </button>
+                    <button
+                      onClick={() => handleDeleteModel(option.model)}
+                      disabled={catalogSaving}
+                      className="p-2 rounded hover:bg-red-900/30 text-red-300 disabled:opacity-50"
+                      title="Delete model"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+
         <div>
           <h3 className="text-sm font-semibold text-gray-200">Allowed Models</h3>
           <p className="text-sm text-gray-400 mt-1">
-            Select which models agents are allowed to use. OpenAI, Anthropic, Gemini and Grok options are included here.
+            Select which catalog models are enabled for agent usage.
           </p>
         </div>
 

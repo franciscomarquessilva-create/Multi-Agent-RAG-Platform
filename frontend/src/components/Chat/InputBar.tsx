@@ -2,7 +2,7 @@ import React, { useState } from 'react'
 import { Send } from 'lucide-react'
 
 interface Props {
-  orchestratorMode?: 'broadcast' | 'orchestrate' | null
+  orchestratorMode?: 'broadcast' | 'orchestrate' | 'mediator' | null
   onSend: (payload: { content: string; iterations?: number; broadcastInstructions?: string; orchestratorInstructions?: string }) => void
   disabled: boolean
 }
@@ -18,6 +18,7 @@ export default function InputBar({
   const [iterations, setIterations] = useState(1)
 
   const isBroadcast = orchestratorMode === 'broadcast'
+  const isMediator = orchestratorMode === 'mediator'
 
   const handleSend = () => {
     if (disabled) return
@@ -37,6 +38,20 @@ export default function InputBar({
         orchestratorInstructions,
       })
       setBroadcastText('')
+      setOrchestratorText('')
+      return
+    }
+
+    if (isMediator) {
+      const discussionTopic = text.trim()
+      const mediatorInstructions = orchestratorText.trim()
+      if (!discussionTopic) return
+      onSend({
+        content: discussionTopic,
+        iterations,
+        orchestratorInstructions: mediatorInstructions || undefined,
+      })
+      setText('')
       setOrchestratorText('')
       return
     }
@@ -107,6 +122,33 @@ export default function InputBar({
                   onChange={e => setOrchestratorText(e.target.value)}
                   onKeyDown={handleKeyDown}
                   placeholder="Instructions to be followed only by the orchestrator..."
+                  disabled={disabled}
+                  rows={3}
+                  className="w-full bg-gray-700 text-gray-100 placeholder-gray-500 rounded-xl px-4 py-2 text-sm resize-y focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                />
+              </div>
+            </>
+          ) : isMediator ? (
+            <>
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">Discussion topic</label>
+                <textarea
+                  value={text}
+                  onChange={e => setText(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder="Topic for the two slave agents to debate..."
+                  disabled={disabled}
+                  rows={3}
+                  className="w-full bg-gray-700 text-gray-100 placeholder-gray-500 rounded-xl px-4 py-2 text-sm resize-y focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">Mediator instructions (private)</label>
+                <textarea
+                  value={orchestratorText}
+                  onChange={e => setOrchestratorText(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder="Only the mediator sees this text. Slave agents do not."
                   disabled={disabled}
                   rows={3}
                   className="w-full bg-gray-700 text-gray-100 placeholder-gray-500 rounded-xl px-4 py-2 text-sm resize-y focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"

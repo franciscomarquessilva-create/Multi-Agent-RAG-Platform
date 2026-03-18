@@ -1,9 +1,18 @@
 import axios from 'axios'
-import type { Agent, AgentCreate, AgentUpdate, AppSettings, Conversation, ConversationWithMessages, LLMLog, PromptConfigItem, StreamChunk, StreamTraceEvent } from '../types'
+import type { Agent, AgentCreate, AgentUpdate, AppSettings, Conversation, ConversationWithMessages, CurrentUser, LLMLog, PromptConfigItem, StreamChunk, StreamTraceEvent, UserSummary, UserUpdate } from '../types'
 
-const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
+const BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api'
 
 const api = axios.create({ baseURL: BASE_URL })
+
+// Impersonation support: AuthContext calls this to set/clear the header globally.
+export function setImpersonationHeader(userId: string | null) {
+  if (userId) {
+    api.defaults.headers.common['X-Impersonate-User-Id'] = userId
+  } else {
+    delete api.defaults.headers.common['X-Impersonate-User-Id']
+  }
+}
 
 // Agents
 export const getAgents = () => api.get<Agent[]>('/agents').then(r => r.data)
@@ -28,11 +37,23 @@ export const getLlmLogs = (limit = 200) =>
 export const getAppSettings = () => api.get<AppSettings>('/settings').then(r => r.data)
 export const updateAppSettings = (allowedModels: string[]) =>
   api.put<AppSettings>('/settings', { allowed_models: allowedModels }).then(r => r.data)
+export const addSettingsModel = (payload: { provider: string; label: string; model: string }) =>
+  api.post<AppSettings>('/settings/models', payload).then(r => r.data)
+export const updateSettingsModel = (payload: { current_model: string; provider: string; label: string; model: string }) =>
+  api.put<AppSettings>('/settings/models', payload).then(r => r.data)
+export const deleteSettingsModel = (model: string) =>
+  api.delete<AppSettings>('/settings/models', { params: { model } }).then(r => r.data)
 
 // Prompt configs
 export const getPromptConfigs = () => api.get<PromptConfigItem[]>('/settings/prompts').then(r => r.data)
 export const updatePromptConfig = (key: string, value: string) =>
   api.put<PromptConfigItem>(`/settings/prompts/${key}`, { value }).then(r => r.data)
+
+// Users / Auth
+export const getMe = () => api.get<CurrentUser>('/users/me').then(r => r.data)
+export const listUsers = () => api.get<UserSummary[]>('/users').then(r => r.data)
+export const updateUser = (id: string, data: UserUpdate) =>
+  api.patch<UserSummary>(`/users/${id}`, data).then(r => r.data)
 
 // Chat streaming
 export interface SendMessageParams {
@@ -57,9 +78,13 @@ export const sendMessageStream = (
   const controller = new AbortController()
   emitTrace('request.start', `conversation_id=${params.conversationId} iterations=${params.iterations ?? 1}`)
 
+  const extraHeaders: Record<string, string> = {}
+  const impersonateId = api.defaults.headers.common['X-Impersonate-User-Id']
+  if (typeof impersonateId === 'string') extraHeaders['X-Impersonate-User-Id'] = impersonateId
+
   fetch(`${BASE_URL}/chat/send`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...extraHeaders },
     body: JSON.stringify({
       conversation_id: params.conversationId,
       content: params.content,
