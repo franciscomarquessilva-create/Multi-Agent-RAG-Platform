@@ -84,7 +84,7 @@ Authentication is bypassed in tests via the `DEV_USER_EMAIL` environment variabl
 ## 3. Integration Tests
 
 ### 3.1 End-to-End Flow (manual / Playwright optional)
-1. Create two agents (Agent A, Agent B); Agent A is auto-promoted to orchestrator (orchestrate mode).
+1. Create two agents (Agent A, Agent B); Agent A is auto-promoted to orchestrator type (the default mode is `orchestrate`; you may change it to `broadcast` or `mediator` in Agent Manager).
 2. Start a new conversation, select Agent B as slave.
 3. Send a message in **Broadcast** mode → verify Agent B response appears alongside the orchestrator's aggregated response.
 4. Send a message in **Orchestrate** mode → verify single synthesised response appears.
