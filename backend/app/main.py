@@ -1,7 +1,9 @@
 import os
+import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request as StarletteRequest
 from app.database import init_db, get_db
@@ -57,15 +59,12 @@ app.include_router(users_router.router)
 
 @app.get("/health")
 async def health():
-    from sqlalchemy import text
-    from sqlalchemy.ext.asyncio import AsyncSession
     db_status = "ok"
     async for db in get_db():
         try:
             await db.execute(text("SELECT 1"))
         except Exception as exc:
             db_status = "error"
-            import logging
             logging.getLogger(__name__).error("Health check DB error: %s", exc)
         break
     status = "ok" if db_status == "ok" else "degraded"

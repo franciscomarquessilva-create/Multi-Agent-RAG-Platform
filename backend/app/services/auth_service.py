@@ -124,7 +124,7 @@ async def _get_user_email_from_cf_jwt(token: str, team_domain: str) -> str:
             _verify_rsa_jwt(signing_input, signature, jwk)
             verified = True
             break
-        except (InvalidSignature, Exception):
+        except (InvalidSignature, ValueError, KeyError):
             continue
 
     if not verified:
