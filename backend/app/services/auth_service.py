@@ -12,13 +12,18 @@ from __future__ import annotations
 import json
 import base64
 import logging
+import time
 from typing import TYPE_CHECKING, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 import httpx
 from fastapi import HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicNumbers
+from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives import hashes
+from cryptography.exceptions import InvalidSignature
 
 from app.config import get_settings
 
@@ -28,28 +33,103 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Cache CF public keys to avoid fetching on every request.
+# Entries: { team_domain: {"keys": [...], "fetched_at": float} }
 _cf_keys_cache: dict = {}
+_CF_KEYS_TTL = 600  # 10 minutes
 
 
 def _b64pad(s: str) -> str:
     return s + "=" * (-len(s) % 4)
 
 
-def _decode_jwt_payload(token: str) -> dict:
-    """Decode JWT payload without signature verification (verification done via JWKS)."""
+def _b64url_to_int(s: str) -> int:
+    """Decode a base64url-encoded big-endian integer (JWK 'n' or 'e')."""
+    data = base64.urlsafe_b64decode(_b64pad(s))
+    return int.from_bytes(data, "big")
+
+
+def _decode_jwt_parts(token: str) -> tuple[dict, dict, bytes, bytes]:
+    """Split JWT into (header, payload, signing_input_bytes, signature_bytes)."""
+    parts = token.split(".")
+    if len(parts) != 3:
+        raise ValueError("Not a JWT")
+    header = json.loads(base64.urlsafe_b64decode(_b64pad(parts[0])))
+    payload = json.loads(base64.urlsafe_b64decode(_b64pad(parts[1])))
+    signing_input = f"{parts[0]}.{parts[1]}".encode()
+    signature = base64.urlsafe_b64decode(_b64pad(parts[2]))
+    return header, payload, signing_input, signature
+
+
+async def _fetch_cf_jwks(team_domain: str) -> list[dict]:
+    """Fetch Cloudflare Access JWKS, with a 10-minute in-memory cache."""
+    now = time.time()
+    cached = _cf_keys_cache.get(team_domain)
+    if cached and (now - cached["fetched_at"]) < _CF_KEYS_TTL:
+        return cached["keys"]
+
+    url = f"https://{team_domain}.cloudflareaccess.com/cdn-cgi/access/certs"
     try:
-        parts = token.split(".")
-        if len(parts) != 3:
-            raise ValueError("Not a JWT")
-        payload_b64 = _b64pad(parts[1])
-        return json.loads(base64.urlsafe_b64decode(payload_b64))
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(url)
+            resp.raise_for_status()
+            data = resp.json()
     except Exception as exc:
-        raise HTTPException(status_code=401, detail=f"Invalid JWT: {exc}") from exc
+        raise HTTPException(status_code=503, detail=f"Failed to fetch CF Access public keys: {exc}") from exc
+
+    keys = data.get("keys") or data.get("public_certs") or []
+    _cf_keys_cache[team_domain] = {"keys": keys, "fetched_at": now}
+    return keys
 
 
-async def _get_user_email_from_cf_jwt(token: str) -> str:
-    """Extract and loosely verify CF Access JWT, return email claim."""
-    payload = _decode_jwt_payload(token)
+def _verify_rsa_jwt(signing_input: bytes, signature: bytes, jwk: dict) -> None:
+    """Verify an RS256 JWT signature against a JWK. Raises InvalidSignature on failure."""
+    n = _b64url_to_int(jwk["n"])
+    e = _b64url_to_int(jwk["e"])
+    public_key = RSAPublicNumbers(e, n).public_key()
+    public_key.verify(signature, signing_input, padding.PKCS1v15(), hashes.SHA256())
+
+
+async def _get_user_email_from_cf_jwt(token: str, team_domain: str) -> str:
+    """Verify CF Access JWT signature against JWKS and return the email claim."""
+    try:
+        header, payload, signing_input, signature = _decode_jwt_parts(token)
+    except Exception as exc:
+        raise HTTPException(status_code=401, detail=f"Invalid JWT format: {exc}") from exc
+
+    alg = header.get("alg", "")
+    kid = header.get("kid", "")
+
+    if alg != "RS256":
+        raise HTTPException(status_code=401, detail=f"Unsupported JWT algorithm: {alg!r}; only RS256 is accepted")
+
+    # Verify expiry before doing the JWKS fetch
+    exp = payload.get("exp")
+    if exp is None or time.time() > exp:
+        raise HTTPException(status_code=401, detail="JWT has expired")
+
+    keys = await _fetch_cf_jwks(team_domain)
+    matching = [k for k in keys if k.get("kid") == kid and k.get("kty") == "RSA"]
+    if not matching:
+        # Retry once in case keys were rotated
+        _cf_keys_cache.pop(team_domain, None)
+        keys = await _fetch_cf_jwks(team_domain)
+        matching = [k for k in keys if k.get("kid") == kid and k.get("kty") == "RSA"]
+
+    if not matching:
+        raise HTTPException(status_code=401, detail="No matching RSA key found in CF Access JWKS")
+
+    verified = False
+    for jwk in matching:
+        try:
+            _verify_rsa_jwt(signing_input, signature, jwk)
+            verified = True
+            break
+        except (InvalidSignature, Exception):
+            continue
+
+    if not verified:
+        raise HTTPException(status_code=401, detail="JWT signature verification failed")
+
     email = payload.get("email") or payload.get("sub", "")
     if not email or "@" not in email:
         raise HTTPException(status_code=401, detail="JWT does not contain a valid email claim")
@@ -66,7 +146,9 @@ async def resolve_user_email(request: Request) -> Optional[str]:
         or request.cookies.get("CF_Authorization")
     )
     if cf_jwt:
-        return await _get_user_email_from_cf_jwt(cf_jwt)
+        if not settings.cf_team_domain:
+            raise HTTPException(status_code=401, detail="CF_TEAM_DOMAIN not configured; cannot verify JWT")
+        return await _get_user_email_from_cf_jwt(cf_jwt, settings.cf_team_domain)
 
     # --- Development bypass (only when CF_TEAM_DOMAIN not set) ---
     if not settings.cf_team_domain:
@@ -105,10 +187,13 @@ async def get_or_create_user(db: AsyncSession, email: str):
         await db.refresh(user)
         logger.info("Created new user %s with role=%s is_active=%s", email, role, is_active)
     else:
-        # Promote/demote role based on env (env is source of truth for admins)
-        expected_role = "admin" if email in admin_emails else user.role
+        # Promote/demote role based on env (env is authoritative when admin_emails is configured)
+        if admin_emails:
+            expected_role = "admin" if email in admin_emails else "user"
+        else:
+            expected_role = user.role
         needs_update = expected_role != user.role
-        user.last_seen_at = datetime.utcnow()
+        user.last_seen_at = datetime.now(timezone.utc)
         if needs_update:
             user.role = expected_role
         if expected_role == "admin" and not user.is_active:

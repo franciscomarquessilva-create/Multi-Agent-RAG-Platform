@@ -7,6 +7,8 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sess
 
 # Set SECRET_KEY before any app imports so get_settings() caches the correct value
 os.environ.setdefault("SECRET_KEY", "dGVzdC1zZWNyZXQta2V5LWZvci11bml0LXRlc3Rpbmc=")
+os.environ.setdefault("DEV_USER_EMAIL", "test@example.com")
+os.environ.setdefault("ADMIN_EMAILS", "test@example.com")
 
 from app.config import get_settings
 get_settings.cache_clear()

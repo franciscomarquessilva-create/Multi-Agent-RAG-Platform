@@ -5,19 +5,19 @@ from typing import Optional
 
 class OrchestrationRule(BaseModel):
     slave_agent_id: str
-    rule: str
+    rule: str = Field(..., max_length=2000)
 
 
 class AgentCreate(BaseModel):
-    name: str
-    model: str
+    name: str = Field(..., max_length=100)
+    model: str = Field(..., max_length=100)
     api_key: str
     agent_type: str = "slave"  # orchestrator | slave
-    purpose: str = ""
-    instructions: str = ""
+    purpose: str = Field(default="", max_length=4000)
+    instructions: str = Field(default="", max_length=8000)
     orchestrator_mode: Optional[str] = None  # broadcast | orchestrate | mediator
-    allowed_slave_ids: list[str] = Field(default_factory=list)
-    orchestration_rules: list[OrchestrationRule] = Field(default_factory=list)
+    allowed_slave_ids: list[str] = Field(default_factory=list, max_length=50)
+    orchestration_rules: list[OrchestrationRule] = Field(default_factory=list, max_length=50)
 
     @field_validator("name", "model", "api_key")
     @classmethod
@@ -29,15 +29,15 @@ class AgentCreate(BaseModel):
 
 
 class AgentUpdate(BaseModel):
-    name: Optional[str] = None
-    model: Optional[str] = None
+    name: Optional[str] = Field(default=None, max_length=100)
+    model: Optional[str] = Field(default=None, max_length=100)
     api_key: Optional[str] = None
     agent_type: Optional[str] = None
-    purpose: Optional[str] = None
-    instructions: Optional[str] = None
+    purpose: Optional[str] = Field(default=None, max_length=4000)
+    instructions: Optional[str] = Field(default=None, max_length=8000)
     orchestrator_mode: Optional[str] = None
-    allowed_slave_ids: Optional[list[str]] = None
-    orchestration_rules: Optional[list[OrchestrationRule]] = None
+    allowed_slave_ids: Optional[list[str]] = Field(default=None, max_length=50)
+    orchestration_rules: Optional[list[OrchestrationRule]] = Field(default=None, max_length=50)
 
     @field_validator("name", "model", "api_key")
     @classmethod

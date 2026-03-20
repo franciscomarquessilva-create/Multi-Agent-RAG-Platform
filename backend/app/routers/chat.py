@@ -3,7 +3,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 import logging
 
 from app.database import get_db
@@ -117,7 +117,7 @@ async def send_message(request: Request, data: ChatRequest, db: AsyncSession = D
     if conv.title == "New Conversation":
         title_source = _conversation_title_source(data, orchestrator.orchestrator_mode)
         conv.title = title_source[:50] + ("..." if len(title_source) > 50 else "")
-    conv.updated_at = datetime.utcnow()
+    conv.updated_at = datetime.now(timezone.utc)
     await db.commit()
 
     collected_responses: list[dict] = []
