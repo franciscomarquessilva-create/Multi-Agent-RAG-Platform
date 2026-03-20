@@ -6,9 +6,10 @@ cd /d "%~dp0"
 :: -----------------------------------------------------------------------
 :: Configure these three variables before running the script.
 :: -----------------------------------------------------------------------
-set "SERVER=user@your-server"
+set "SERVER=francis@fraserver01"
+set "SERVER_HOST=fraserver01"
 set "APP_DIR=~/apps/multi-agent-investigation-rag"
-set "FRONTEND_PORT=3000"
+set "FRONTEND_PORT=3002"
 set "DEPLOY_MODE=fast"
 
 if /I "%~1"=="--full-backend" set "DEPLOY_MODE=full-backend"
@@ -32,7 +33,7 @@ ssh %SERVER% "mkdir -p %APP_DIR%/backend %APP_DIR%/frontend %APP_DIR%/docs && rm
 if errorlevel 1 exit /b 1
 
 echo [2/5] Uploading root files...
-scp docker-compose.yml README.md %SERVER%:%APP_DIR%/
+scp docker-compose.yml docker-compose.override.yml README.md %SERVER%:%APP_DIR%/
 if errorlevel 1 exit /b 1
 
 scp docs/ARCHITECTURE.md docs/DEPLOYMENT.md docs/REQUIREMENTS.md docs/TESTS.md %SERVER%:%APP_DIR%/docs/
@@ -51,17 +52,17 @@ if errorlevel 1 exit /b 1
 
 if /I "%DEPLOY_MODE%"=="full-backend" (
     echo [5/5] Full rebuild ^(backend + frontend^) and smoke checks...
-    ssh %SERVER% "cd %APP_DIR% && docker compose up --build -d && sleep 5 && curl -fsS http://localhost:8000/health && echo && curl -fsS http://localhost:%FRONTEND_PORT% > /dev/null && docker compose ps"
+    ssh %SERVER% "cd %APP_DIR% && docker compose -f docker-compose.yml -f docker-compose.override.yml up --build -d && sleep 5 && curl -fsS http://localhost:8000/health && echo && curl -fsS http://localhost:%FRONTEND_PORT% > /dev/null && docker compose -f docker-compose.yml -f docker-compose.override.yml ps"
     if errorlevel 1 exit /b 1
 ) else (
     echo [5/5] Fast deploy ^(rebuild frontend only^) and smoke checks...
-    ssh %SERVER% "cd %APP_DIR% && docker compose build frontend && docker compose up -d --no-deps frontend && sleep 5 && curl -fsS http://localhost:8000/health && echo && curl -fsS http://localhost:%FRONTEND_PORT% > /dev/null && docker compose ps"
+    ssh %SERVER% "cd %APP_DIR% && docker compose -f docker-compose.yml -f docker-compose.override.yml build frontend && docker compose -f docker-compose.yml -f docker-compose.override.yml up -d --no-deps frontend && sleep 5 && curl -fsS http://localhost:8000/health && echo && curl -fsS http://localhost:%FRONTEND_PORT% > /dev/null && docker compose -f docker-compose.yml -f docker-compose.override.yml ps"
     if errorlevel 1 exit /b 1
 )
 
 echo Deployment complete.
-echo Frontend: http://<your-server>:%FRONTEND_PORT%
-echo Backend:  http://<your-server>:8000
+echo Frontend: http://%SERVER_HOST%:%FRONTEND_PORT%
+echo Backend:  http://%SERVER_HOST%:8000
 if /I "%DEPLOY_MODE%"=="fast" echo Mode: fast ^(frontend rebuild only^)
 if /I "%DEPLOY_MODE%"=="full-backend" echo Mode: full-backend ^(backend + frontend rebuild^)
 

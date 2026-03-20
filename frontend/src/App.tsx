@@ -14,7 +14,7 @@ import { useAuth } from './contexts/AuthContext'
 type View = 'chat' | 'agents' | 'audit' | 'settings' | 'admin'
 
 export default function App() {
-  const { currentUser, isLoading, authError, impersonatingUserEmail, stopImpersonating, refreshUser } = useAuth()
+  const { currentUser, isLoading, authError, impersonatingUserEmail, stopImpersonating, logout, refreshUser } = useAuth()
   const [view, setView] = useState<View>('chat')
   const [agents, setAgents] = useState<Agent[]>([])
   const [conversations, setConversations] = useState<Conversation[]>([])
@@ -320,6 +320,7 @@ export default function App() {
         onManageAgents={() => setView('agents')}
         onOpenSettings={() => setView('settings')}
         onOpenAudit={() => setView('audit')}
+        onLogout={logout}
         onOpenAdmin={currentUser?.role === 'admin' ? () => setView('admin') : undefined}
       />
 

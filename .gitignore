@@ -48,3 +48,7 @@ Thumbs.db
 htmlcov/
 .coverage
 coverage.xml
+
+# deployment
+dp_remote.bat
+docker-compose.override.yml

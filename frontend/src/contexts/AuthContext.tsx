@@ -11,6 +11,7 @@ interface AuthContextValue {
   impersonatingUserEmail: string | null
   impersonate: (userId: string, userEmail: string) => void
   stopImpersonating: () => void
+  logout: () => void
   refreshUser: () => Promise<void>
 }
 
@@ -52,6 +53,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setImpersonationHeader(null)
   }, [])
 
+  const logout = useCallback(() => {
+    stopImpersonating()
+    setCurrentUser(null)
+    setAuthError(null)
+    window.location.assign('/cdn-cgi/access/logout')
+  }, [stopImpersonating])
+
   return (
     <AuthContext.Provider value={{
       currentUser,
@@ -61,6 +69,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       impersonatingUserEmail,
       impersonate,
       stopImpersonating,
+      logout,
       refreshUser,
     }}>
       {children}

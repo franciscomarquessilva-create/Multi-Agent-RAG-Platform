@@ -40,7 +40,7 @@ services:
     # labels:
     #   - "traefik.enable=true"
     #   - "traefik.docker.network=proxy"
-    #   - "traefik.http.routers.mrag.rule=Host(`mrag.aiops3000.com`)"
+    #   - "traefik.http.routers.mrag.rule=Host(`<your domain here>`)"
     #   - "traefik.http.routers.mrag.entrypoints=web"
     #   - "traefik.http.services.mrag.loadbalancer.server.port=80"
 

@@ -1,4 +1,4 @@
-import { FileText, MessageSquare, Plus, Settings, ShieldCheck, SlidersHorizontal, Trash2, UserX } from 'lucide-react'
+import { FileText, LogOut, MessageSquare, Plus, Settings, ShieldCheck, SlidersHorizontal, Trash2, UserX } from 'lucide-react'
 import type { Conversation, CurrentUser } from '../../types'
 
 interface Props {
@@ -13,6 +13,7 @@ interface Props {
   onManageAgents: () => void
   onOpenSettings: () => void
   onOpenAudit: () => void
+  onLogout: () => void
   onOpenAdmin?: () => void
 }
 
@@ -28,6 +29,7 @@ export default function Sidebar({
   onManageAgents,
   onOpenSettings,
   onOpenAudit,
+  onLogout,
   onOpenAdmin,
 }: Props) {
   return (
@@ -130,6 +132,13 @@ export default function Sidebar({
             Admin Panel
           </button>
         )}
+        <button
+          onClick={onLogout}
+          className="w-full flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-gray-700 transition-colors text-sm text-red-300"
+        >
+          <LogOut size={16} />
+          Logout
+        </button>
       </div>
     </aside>
   )

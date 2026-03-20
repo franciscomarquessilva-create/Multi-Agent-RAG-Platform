@@ -24,6 +24,7 @@ describe('Sidebar', () => {
     onManageAgents: vi.fn(),
     onOpenSettings: vi.fn(),
     onOpenAudit: vi.fn(),
+    onLogout: vi.fn(),
   }
 
   it('renders_conversations', () => {
