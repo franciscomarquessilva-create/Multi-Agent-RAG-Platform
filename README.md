@@ -36,7 +36,7 @@ Instead of relying on a single LLM, this system:
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for a full description of the system design, data models, and data flows.
 
-```mermaid
+-- mermaid
 flowchart LR
     UI[Frontend UI] --> API[Backend API]
 
