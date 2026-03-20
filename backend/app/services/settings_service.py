@@ -1,5 +1,5 @@
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import HTTPException
 from sqlalchemy import select
@@ -428,7 +428,7 @@ async def get_all_prompt_values(db: AsyncSession) -> dict[str, str]:
                 key=key,
                 value=meta["value"],
                 description=meta["description"],
-                updated_at=datetime.utcnow(),
+                updated_at=datetime.now(timezone.utc),
             ))
             rows[key] = meta["value"]
             needs_commit = True
@@ -461,12 +461,12 @@ async def update_prompt_config(db: AsyncSession, key: str, value: str) -> Prompt
             key=key,
             value=value,
             description=PROMPT_DEFAULTS[key]["description"],
-            updated_at=datetime.utcnow(),
+            updated_at=datetime.now(timezone.utc),
         )
         db.add(row)
     else:
         row.value = value
-        row.updated_at = datetime.utcnow()
+        row.updated_at = datetime.now(timezone.utc)
 
     await db.commit()
     await db.refresh(row)

@@ -5,7 +5,7 @@ from typing import Optional, List
 
 class MessageCreate(BaseModel):
     role: str
-    content: str
+    content: str = Field(..., max_length=32000)
     message_type: str = "chat"
     mode: Optional[str] = None
     agent_id: Optional[str] = None
@@ -28,9 +28,9 @@ class MessageResponse(BaseModel):
 
 class ChatRequest(BaseModel):
     conversation_id: str
-    content: str
+    content: str = Field(..., max_length=32000)
     mode: Optional[str] = "orchestrator"  # kept for backward compatibility
     agent_ids: Optional[List[str]] = None  # deprecated; conversation agent_ids are used
-    broadcast_instructions: Optional[str] = None
-    orchestrator_instructions: Optional[str] = None
+    broadcast_instructions: Optional[str] = Field(default=None, max_length=8000)
+    orchestrator_instructions: Optional[str] = Field(default=None, max_length=8000)
     iterations: int = Field(default=1, ge=1, le=10)
