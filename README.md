@@ -1,6 +1,24 @@
-# Multi-Agent Investigation RAG
+# Multi-Agent RAG Platform
 
-A self-hosted, multi-agent Retrieval-Augmented Generation (RAG) platform. Configure multiple LLM agents, designate one as the orchestrator, and explore complex topics through structured AI collaboration — with a ChatGPT-like interface and persistent per-agent memory.
+A production-ready, self-hosted platform for orchestrating multiple AI agents with retrieval-augmented generation (RAG), persistent memory, and full auditability.
+
+---
+
+## 🚀 Overview
+
+This project provides a **multi-agent orchestration framework** that enables structured AI collaboration to investigate complex topics.
+
+Instead of relying on a single LLM, this system:
+- Coordinates **specialized agents**
+- Uses **retrieval (RAG)** for grounded responses
+- Maintains **persistent memory**
+- Produces **traceable, auditable outputs**
+
+👉 Designed for real-world use cases such as:
+- Research and investigation
+- Risk and compliance analysis
+- Knowledge synthesis
+- Enterprise AI copilots
 
 ## Features
 
@@ -17,6 +35,21 @@ A self-hosted, multi-agent Retrieval-Augmented Generation (RAG) platform. Config
 ## Architecture
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for a full description of the system design, data models, and data flows.
+
+```mermaid
+flowchart LR
+    UI[Frontend UI] --> API[Backend API]
+
+    API --> ORCH[Orchestrator]
+    API --> AGENTS[Specialized Agents]
+
+    ORCH --> AGENTS
+
+    AGENTS --> MEM[(Vector DB - Chroma)]
+    ORCH --> MEM
+
+    API --> DB[(Application DB)]
+    API --> LOGS[(LLM Logs / Audit)]
 
 ## Quick Start (Docker)
 
@@ -104,3 +137,22 @@ npm test
 | Relational DB | SQLite (async via `aiosqlite`) |
 | Auth (production) | Cloudflare Access JWT |
 | Containerisation | Docker, Docker Compose |
+
+
+## Repository Structure
+
+backend/
+  ├── routers/
+  ├── services/
+  ├── models/
+  └── schemas/
+
+frontend/
+db/
+tests/
+docs/
+
+## License
+
+MIT license
+
