@@ -83,7 +83,6 @@ class AgentMCPServer:
         try:
             response_text = await complete(self.model, self.api_key, messages)
             await self._log_llm_call(messages=messages, response_text=response_text)
-            await self._deduct_credits()
             return response_text
         except Exception as exc:
             await self._log_llm_call(messages=messages, error=str(exc))
@@ -97,7 +96,6 @@ class AgentMCPServer:
                 full_response += chunk
                 yield chunk
             await self._log_llm_call(messages=messages, response_text=full_response)
-            await self._deduct_credits()
         except Exception as exc:
             await self._log_llm_call(messages=messages, response_text=full_response or None, error=str(exc))
             raise

@@ -254,6 +254,8 @@ export default function App() {
           console.error('Failed to refresh conversation', e)
           trace('app.conversation.refresh_error', e instanceof Error ? e.message : String(e))
         }
+        // Refresh user credits in the sidebar
+        await refreshUser()
       },
       (err) => {
         trace('app.stream.error', err.message)
