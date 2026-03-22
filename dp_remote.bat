@@ -6,9 +6,9 @@ cd /d "%~dp0"
 :: -----------------------------------------------------------------------
 :: Configure these three variables before running the script.
 :: -----------------------------------------------------------------------
-set "SERVER=francis@fraserver01"
-set "SERVER_HOST=fraserver01"
-set "APP_DIR=~/apps/multi-agent-investigation-rag"
+set "SERVER=user@your-server"
+set "SERVER_HOST=your-server"
+set "APP_DIR=~/apps/multi-agent-rag"
 set "FRONTEND_PORT=3002"
 set "DEPLOY_MODE=fast"
 

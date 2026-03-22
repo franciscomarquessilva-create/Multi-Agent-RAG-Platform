@@ -50,5 +50,4 @@ htmlcov/
 coverage.xml
 
 # deployment
-dp_remote.bat
 docker-compose.override.yml

@@ -36,7 +36,7 @@ Instead of relying on a single LLM, this system:
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for a full description of the system design, data models, and data flows.
 
--- mermaid
+```mermaid
 flowchart LR
     UI[Frontend UI] --> API[Backend API]
 
@@ -50,6 +50,7 @@ flowchart LR
 
     API --> DB[(Application DB)]
     API --> LOGS[(LLM Logs / Audit)]
+```
 
 ## Quick Start (Docker)
 
@@ -141,18 +142,26 @@ npm test
 
 ## Repository Structure
 
+```
 backend/
-  ├── routers/
-  ├── services/
-  ├── models/
-  └── schemas/
-
+  ├── app/
+  │   ├── routers/
+  │   ├── services/
+  │   ├── models/
+  │   └── schemas/
+  └── tests/
 frontend/
-db/
-tests/
+  └── src/
 docs/
+```
+
+## Contributing
+
+Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for community standards.
+
+To report a security vulnerability, see [SECURITY.md](SECURITY.md).
 
 ## License
 
-MIT license
+This project is licensed under the [MIT License](LICENSE).
 

@@ -1,0 +1,48 @@
+# docker-compose.override.example.yml
+#
+# Copy this file to docker-compose.override.yml and uncomment/edit the sections
+# you need for your deployment. The override file is gitignored so it stays local
+# to each deployment environment.
+#
+# Usage with the deploy script:
+#   docker compose -f docker-compose.yml -f docker-compose.override.yml up -d
+#
+# Common use cases:
+#   - Set a custom frontend port
+#   - Expose the backend directly (not recommended in production)
+#   - Add Traefik labels for a reverse proxy + Cloudflare Tunnel setup
+#     (see docs/INFRA.md for the full infrastructure pattern)
+
+version: "3.8"
+
+services:
+  frontend:
+    # Override the host port (default is 3000).
+    # ports:
+    #   - "3002:80"
+
+    # Add Traefik labels + proxy network to expose through Cloudflare Tunnel.
+    # Replace <your-domain> with your actual public hostname.
+    # Also uncomment the top-level 'networks' block at the bottom.
+    #
+    # networks:
+    #   - default
+    #   - proxy
+    # labels:
+    #   - "traefik.enable=true"
+    #   - "traefik.docker.network=proxy"
+    #   - "traefik.http.routers.mrag.rule=Host(`<your-domain>`)"
+    #   - "traefik.http.routers.mrag.entrypoints=websecure"
+    #   - "traefik.http.routers.mrag.tls=true"
+    #   - "traefik.http.services.mrag.loadbalancer.server.port=80"
+
+  # Uncomment to expose the backend API directly on the host.
+  # Only do this in development or if it is protected by another layer.
+  # backend:
+  #   ports:
+  #     - "8000:8000"
+
+# Uncomment when using the Traefik proxy network (see labels above).
+# networks:
+#   proxy:
+#     external: true
