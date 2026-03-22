@@ -8,7 +8,7 @@ from fastapi import HTTPException
 import base64
 import hashlib
 from app.services.llm_service import normalize_model_name
-from app.services.settings_service import is_model_allowed
+from app.services.settings_service import is_model_enabled
 
 
 def _get_fernet() -> Fernet:
@@ -53,26 +53,12 @@ def _validate_orchestrator_mode(mode: str | None) -> str:
 async def _validate_orchestrator_config(
     db: AsyncSession,
     allowed_slave_ids: list[str],
-    orchestration_rules: list,
 ):
     # Ensure allowed targets are real slave agents.
     for sid in allowed_slave_ids:
         agent = await get_agent(db, sid)
         if agent.agent_type != "slave":
             raise HTTPException(status_code=400, detail=f"Agent '{agent.name}' is not a slave agent")
-
-    allowed_set = set(allowed_slave_ids)
-    for rule in orchestration_rules:
-        slave_id = rule.get("slave_agent_id") if isinstance(rule, dict) else rule.slave_agent_id
-        if slave_id not in allowed_set:
-            raise HTTPException(
-                status_code=400,
-                detail="Every orchestration rule must target a slave listed in allowed_slave_ids",
-            )
-        rule_text = rule.get("rule", "") if isinstance(rule, dict) else rule.rule
-        if not str(rule_text).strip():
-            raise HTTPException(status_code=400, detail="Orchestration rule text cannot be empty")
-
 
 async def create_agent(db: AsyncSession, data: AgentCreate, owner_id: str | None = None) -> Agent:
     # Check duplicate name scoped to this owner
@@ -85,8 +71,8 @@ async def create_agent(db: AsyncSession, data: AgentCreate, owner_id: str | None
 
     agent_type = _validate_agent_type(data.agent_type)
     normalized_model = normalize_model_name(data.model)
-    if not await is_model_allowed(db, normalized_model):
-        raise HTTPException(status_code=400, detail=f"Model '{normalized_model}' is not enabled in settings")
+    if not await is_model_enabled(db, normalized_model):
+        raise HTTPException(status_code=400, detail=f"Model '{normalized_model}' is disabled in model catalog")
 
     # Check if this is the first agent for this owner -> force orchestrator
     first_q = select(Agent).where(Agent.owner_id == owner_id) if owner_id else select(Agent)
@@ -97,7 +83,7 @@ async def create_agent(db: AsyncSession, data: AgentCreate, owner_id: str | None
         agent_type = "orchestrator"
 
     if agent_type == "orchestrator":
-        await _validate_orchestrator_config(db, data.allowed_slave_ids, data.orchestration_rules)
+        await _validate_orchestrator_config(db, data.allowed_slave_ids)
 
     agent = Agent(
         name=data.name,
@@ -112,7 +98,7 @@ async def create_agent(db: AsyncSession, data: AgentCreate, owner_id: str | None
     )
     agent.use_default_key = data.use_default_key
     agent.allowed_slave_ids = data.allowed_slave_ids if agent_type == "orchestrator" else []
-    agent.orchestration_rules = [r.model_dump() for r in data.orchestration_rules] if agent_type == "orchestrator" else []
+    agent.orchestration_rules = []
     db.add(agent)
     await db.commit()
     await db.refresh(agent)
@@ -151,8 +137,8 @@ async def update_agent(db: AsyncSession, agent_id: str, data: AgentUpdate) -> Ag
         agent.name = data.name
     if data.model is not None:
         normalized_model = normalize_model_name(data.model)
-        if not await is_model_allowed(db, normalized_model):
-            raise HTTPException(status_code=400, detail=f"Model '{normalized_model}' is not enabled in settings")
+        if not await is_model_enabled(db, normalized_model):
+            raise HTTPException(status_code=400, detail=f"Model '{normalized_model}' is disabled in model catalog")
         agent.model = normalized_model
     if data.api_key is not None:
         agent.api_key_encrypted = encrypt_api_key(data.api_key)
@@ -177,13 +163,11 @@ async def update_agent(db: AsyncSession, agent_id: str, data: AgentUpdate) -> Ag
         agent.instructions = data.instructions
 
     if next_type == "orchestrator":
-        if data.allowed_slave_ids is not None or data.orchestration_rules is not None:
+        if data.allowed_slave_ids is not None:
             allowed = data.allowed_slave_ids if data.allowed_slave_ids is not None else agent.allowed_slave_ids
-            rules = data.orchestration_rules if data.orchestration_rules is not None else agent.orchestration_rules
-            await _validate_orchestrator_config(db, allowed, rules)
+            await _validate_orchestrator_config(db, allowed)
             agent.allowed_slave_ids = allowed
-            if data.orchestration_rules is not None:
-                agent.orchestration_rules = [r.model_dump() for r in data.orchestration_rules]
+            agent.orchestration_rules = []
         if data.orchestrator_mode is not None:
             agent.orchestrator_mode = _validate_orchestrator_mode(data.orchestrator_mode)
         elif not agent.orchestrator_mode:

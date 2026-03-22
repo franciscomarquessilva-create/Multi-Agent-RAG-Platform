@@ -6,12 +6,14 @@ class ModelOption(BaseModel):
     provider: str
     label: str
     model: str
+    enabled: bool = True
 
 
 class ModelOptionCreate(BaseModel):
     provider: str
     label: str
     model: str
+    enabled: bool = True
 
 
 class ModelOptionUpdate(BaseModel):
@@ -19,17 +21,16 @@ class ModelOptionUpdate(BaseModel):
     provider: str
     label: str
     model: str
+    enabled: bool = True
 
 
 class AppSettingsResponse(BaseModel):
-    allowed_models: list[str] = Field(default_factory=list)
     available_models: list[ModelOption] = Field(default_factory=list)
     credits_per_process: int = 1
-    default_key_models: list[str] = Field(default_factory=list)
+    default_key_providers: list[str] = Field(default_factory=list)
 
 
 class AppSettingsUpdate(BaseModel):
-    allowed_models: list[str] = Field(default_factory=list)
     credits_per_process: Optional[int] = None
 
 
@@ -46,5 +47,5 @@ class PromptConfigUpdate(BaseModel):
 
 
 class DefaultKeyUpdate(BaseModel):
-    model: str
+    provider: str
     api_key: str

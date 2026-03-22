@@ -99,9 +99,6 @@ async def send_message(request: Request, data: ChatRequest, db: AsyncSession = D
 
     display_content = _compose_user_content(data, orchestrator.orchestrator_mode)
 
-    # Resolve target label for chat history.
-    target_label = f"Orchestrator: {orchestrator.name}"
-
     # Save user message.
     user_msg = Message(
         conversation_id=data.conversation_id,
@@ -109,7 +106,7 @@ async def send_message(request: Request, data: ChatRequest, db: AsyncSession = D
         content=display_content,
         message_type="chat",
         mode="orchestrator",
-        agent_name=target_label,
+        agent_name=None,
     )
     db.add(user_msg)
 
@@ -134,6 +131,7 @@ async def send_message(request: Request, data: ChatRequest, db: AsyncSession = D
                 iterations=data.iterations,
                 broadcast_instructions=data.broadcast_instructions,
                 orchestrator_instructions=data.orchestrator_instructions,
+                owner_id=actor.id,
             )
 
             async for chunk in gen:

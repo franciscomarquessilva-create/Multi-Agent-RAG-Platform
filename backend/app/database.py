@@ -77,19 +77,23 @@ async def init_db():
             app_settings_cols = {row[1] for row in app_settings_cols_result.fetchall()}
             if app_settings_cols and "available_models_json" not in app_settings_cols:
                 await conn.execute(text("ALTER TABLE app_settings ADD COLUMN available_models_json TEXT NOT NULL DEFAULT '[]'"))
+            if app_settings_cols and "credits_per_process" not in app_settings_cols:
+                await conn.execute(text("ALTER TABLE app_settings ADD COLUMN credits_per_process INTEGER NOT NULL DEFAULT 1"))
+            if app_settings_cols and "default_api_keys_json" not in app_settings_cols:
+                await conn.execute(text("ALTER TABLE app_settings ADD COLUMN default_api_keys_json TEXT NOT NULL DEFAULT '{}' "))
 
             default_models_payload = json.dumps([
-                {"provider": "OpenAI", "label": "GPT-5.2", "model": "openai/gpt-5.2"},
-                {"provider": "OpenAI", "label": "GPT-5.1", "model": "openai/gpt-5.1"},
-                {"provider": "OpenAI", "label": "GPT-4o", "model": "openai/gpt-4o"},
-                {"provider": "Anthropic", "label": "Claude 3.7 Sonnet", "model": "anthropic/claude-3-7-sonnet"},
-                {"provider": "Anthropic", "label": "Claude 3.5 Sonnet", "model": "anthropic/claude-3-5-sonnet"},
-                {"provider": "Anthropic", "label": "Claude 3.5 Haiku", "model": "anthropic/claude-3-5-haiku"},
-                {"provider": "Gemini", "label": "Gemini 2.0 Flash", "model": "gemini/gemini-2.0-flash"},
-                {"provider": "Gemini", "label": "Gemini 1.5 Pro", "model": "gemini/gemini-1.5-pro"},
-                {"provider": "Gemini", "label": "Gemini 1.5 Flash", "model": "gemini/gemini-1.5-flash"},
-                {"provider": "Grok", "label": "Grok 2", "model": "xai/grok-2"},
-                {"provider": "Grok", "label": "Grok 2 Latest", "model": "xai/grok-2-latest"},
+                {"provider": "OpenAI", "label": "GPT-5.2", "model": "openai/gpt-5.2", "enabled": True},
+                {"provider": "OpenAI", "label": "GPT-5.1", "model": "openai/gpt-5.1", "enabled": True},
+                {"provider": "OpenAI", "label": "GPT-4o", "model": "openai/gpt-4o", "enabled": True},
+                {"provider": "Anthropic", "label": "Claude 3.7 Sonnet", "model": "anthropic/claude-3-7-sonnet", "enabled": True},
+                {"provider": "Anthropic", "label": "Claude 3.5 Sonnet", "model": "anthropic/claude-3-5-sonnet", "enabled": True},
+                {"provider": "Anthropic", "label": "Claude 3.5 Haiku", "model": "anthropic/claude-3-5-haiku", "enabled": True},
+                {"provider": "Gemini", "label": "Gemini 2.0 Flash", "model": "gemini/gemini-2.0-flash", "enabled": True},
+                {"provider": "Gemini", "label": "Gemini 1.5 Pro", "model": "gemini/gemini-1.5-pro", "enabled": True},
+                {"provider": "Gemini", "label": "Gemini 1.5 Flash", "model": "gemini/gemini-1.5-flash", "enabled": True},
+                {"provider": "Grok", "label": "Grok 2", "model": "xai/grok-2", "enabled": True},
+                {"provider": "Grok", "label": "Grok 2 Latest", "model": "xai/grok-2-latest", "enabled": True},
             ])
             if app_settings_cols:
                 await conn.execute(
@@ -111,6 +115,8 @@ async def init_db():
             # --- owner_id on agents ---
             if "owner_id" not in table_cols["agents"]:
                 await conn.execute(text("ALTER TABLE agents ADD COLUMN owner_id VARCHAR(36) REFERENCES users(id) ON DELETE SET NULL"))
+            if "use_default_key" not in table_cols["agents"]:
+                await conn.execute(text("ALTER TABLE agents ADD COLUMN use_default_key BOOLEAN NOT NULL DEFAULT 0"))
 
             # --- owner_id on conversations ---
             if "owner_id" not in table_cols.get("conversations", set()):

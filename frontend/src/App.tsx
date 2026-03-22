@@ -321,21 +321,21 @@ export default function App() {
         onOpenSettings={() => setView('settings')}
         onOpenAudit={() => setView('audit')}
         onLogout={logout}
-        onOpenAdmin={currentUser?.role === 'admin' ? () => setView('admin') : undefined}
+        onOpenAdmin={currentUser?.role === 'admin' && !impersonatingUserEmail ? () => setView('admin') : undefined}
       />
 
       <main className="flex-1 overflow-hidden">
-        {view === 'admin' ? (
+        {view === 'admin' && !impersonatingUserEmail ? (
           <AdminPanel onBack={() => setView('chat')} onUserChanged={refreshUser} />
         ) : view === 'agents' ? (
           <AgentManager
             agents={agents}
-            allowedModels={settings?.allowed_models ?? []}
+            availableModels={settings?.available_models ?? []}
             promptConfigs={promptConfigs}
             onAgentsChanged={loadAgents}
             onBack={() => setView('chat')}
           />
-        ) : view === 'settings' ? (
+        ) : view === 'settings' && !impersonatingUserEmail ? (
           <Settings
             settings={settings}
             promptConfigs={promptConfigs}
@@ -343,7 +343,7 @@ export default function App() {
             onPromptsChanged={setPromptConfigs}
             onBack={() => setView('chat')}
           />
-        ) : view === 'audit' ? (
+        ) : view === 'audit' && !impersonatingUserEmail ? (
           <Audit onBack={() => setView('chat')} />
         ) : (
           <Chat

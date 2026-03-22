@@ -35,11 +35,15 @@ export const getLlmLogs = (limit = 200) =>
 
 // Settings
 export const getAppSettings = () => api.get<AppSettings>('/settings').then(r => r.data)
-export const updateAppSettings = (allowedModels: string[]) =>
-  api.put<AppSettings>('/settings', { allowed_models: allowedModels }).then(r => r.data)
-export const addSettingsModel = (payload: { provider: string; label: string; model: string }) =>
+export const updateAppSettings = (creditsPerProcess?: number) =>
+  api.put<AppSettings>('/settings', { credits_per_process: creditsPerProcess }).then(r => r.data)
+export const setDefaultKey = (provider: string, apiKey: string) =>
+  api.post<AppSettings>('/settings/default-keys', { provider, api_key: apiKey }).then(r => r.data)
+export const deleteDefaultKey = (provider: string) =>
+  api.delete<AppSettings>('/settings/default-keys', { params: { provider } }).then(r => r.data)
+export const addSettingsModel = (payload: { provider: string; label: string; model: string; enabled: boolean }) =>
   api.post<AppSettings>('/settings/models', payload).then(r => r.data)
-export const updateSettingsModel = (payload: { current_model: string; provider: string; label: string; model: string }) =>
+export const updateSettingsModel = (payload: { current_model: string; provider: string; label: string; model: string; enabled: boolean }) =>
   api.put<AppSettings>('/settings/models', payload).then(r => r.data)
 export const deleteSettingsModel = (model: string) =>
   api.delete<AppSettings>('/settings/models', { params: { model } }).then(r => r.data)

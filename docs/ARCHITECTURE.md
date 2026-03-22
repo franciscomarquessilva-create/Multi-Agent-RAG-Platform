@@ -1,250 +1,82 @@
-# Multi-Agent Investigation RAG — Architecture
+# Multi-Agent Investigation RAG - Architecture
 
 ## 1. High-Level Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                          Browser (React)                         │
-│  ┌──────────────┐  ┌──────────────────────────────────────────┐ │
-│  │   Sidebar    │  │              Main Area                   │ │
-│  │Conversations │  │  Chat │ AgentManager │ Settings │ Audit  │ │
-│  │   + Nav      │  │       │              │ AdminPanel        │ │
-│  └──────────────┘  └──────────────────────────────────────────┘ │
-└──────────────────────────┬──────────────────────────────────────┘
-                           │  REST + SSE (EventSource)
-┌──────────────────────────▼──────────────────────────────────────┐
-│                       FastAPI Backend                            │
-│  ┌────────────┐ ┌──────────────┐ ┌────────┐ ┌───────────────┐  │
-│  │  /agents   │ │/conversations│ │ /chat  │ │/logs /settings│  │
-│  │  /users    │ │              │ │  SSE   │ │  /settings/   │  │
-│  └─────┬──────┘ └──────┬───────┘ └───┬────┘ │  prompts      │  │
-│        │               │             │      └───────────────┘  │
-│  ┌─────▼───────────────▼─────────────▼──────────────────────┐  │
-│  │                     Services Layer                        │  │
-│  │  AgentService │ ConversationService │ OrchestratorService │  │
-│  │  AuthService  │ UserService         │ SettingsService     │  │
-│  │  LLMService   │ LLMLogService       │ VectorStoreService  │  │
-│  └──────────────────────────┬──────────────────────────────┘   │
-│                              │                                   │
-│  ┌───────────────────────────▼──────────────────────────────┐   │
-│  │               MCP Agent Layer (per agent)                │   │
-│  │  ┌──────────────┐  ┌───────────┐  ┌──────────────────┐  │   │
-│  │  │search_memory │  │add_memory │  │generate_response │  │   │
-│  │  └──────┬───────┘  └─────┬─────┘  └────────┬─────────┘  │   │
-│  │         └────────────────┼─────────────────┘            │   │
-│  │                     ┌────▼──────┐                        │   │
-│  │                     │ ChromaDB  │ (one collection/agent) │   │
-│  │                     └───────────┘                        │   │
-│  └──────────────────────────────────────────────────────────┘   │
-│                              │                                   │
-│  ┌───────────────────────────▼──────────────────────────────┐   │
-│  │                SQLite (SQLAlchemy async)                  │   │
-│  │  agents │ users │ conversations │ messages               │   │
-│  │  app_settings │ prompt_configs │ llm_logs               │   │
-│  └──────────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────┘
-```
+- Frontend: React + TypeScript + Vite
+- Backend: FastAPI + SQLAlchemy (async)
+- Persistence: SQLite + ChromaDB
+- LLM access: LiteLLM wrappers and direct Anthropic streaming path
+- Transport: REST + SSE for streaming chat
 
-## 2. Component Descriptions
+## 2. Core Domains
 
-### 2.1 Frontend (React + TypeScript + Vite)
-- **Sidebar**: Lists all conversations; allows creating new ones; shows user info (email, role, credits).
-- **Chat**: Displays messages with SSE streaming; includes a mode toggle (Orchestrator / Broadcast / Mediator).
-- **AgentManager**: CRUD UI for agents; creates orchestrator and slave agents with configurable modes.
-- **Settings**: Manage available LLM models (add / edit / delete) and configurable prompt templates.
-- **Audit**: Displays LLM call logs (model, agent, request/response payloads, errors).
-- **AdminPanel**: Admin-only view for managing users (activate, block, adjust credits/agent limits, impersonate).
-- **NewConversationModal**: Selects which slave agents participate in a conversation.
-- **API Service**: Axios-based HTTP client + `fetch`-based EventSource for SSE streaming.
-- **AuthContext**: Reads current-user data from `/users/me`; handles admin impersonation.
+### 2.1 Agent Domain
+- Agent types: orchestrator, slave
+- Orchestrator modes: broadcast, orchestrate, mediator
+- Agent fields include model, purpose, instructions, allowed_slave_ids, use_default_key
+- Routing rules were removed from configuration and API payloads
 
-### 2.2 Backend (FastAPI)
+### 2.2 Model Catalog Domain
+- Global catalog in app settings with entries:
+  - provider
+  - label
+  - model
+  - enabled
+- Enabled/disabled is controlled directly per catalog row
+- Agent creation/update requires selected model to be enabled
 
-| Router | Endpoints |
-|--------|-----------|
-| `/agents` | GET, POST, PUT /{id}, DELETE /{id}, PATCH /{id}/orchestrator |
-| `/conversations` | GET, POST, GET /{id}, DELETE /{id}, PATCH /{id}/title |
-| `/chat` | POST /send (SSE stream) |
-| `/users` | GET /me, GET, GET /{id}, PATCH /{id} |
-| `/logs` | GET /llm |
-| `/settings` | GET, PUT, GET /models, POST /models, PUT /models, DELETE /models, GET /prompts, PUT /prompts/{key} |
+### 2.3 Key Management Domain
+- Agent can use:
+  - own key (stored encrypted per agent)
+  - provider default key (stored encrypted in app settings)
+- Provider default keys are keyed by provider (openai, anthropic, gemini, xai)
+- Provider key resolution is derived from the agent model provider prefix
 
-### 2.3 Services Layer
-- **AgentService**: CRUD for agents; orchestrator management; API key encrypt/decrypt.
-- **ConversationService**: CRUD for conversations and messages.
-- **OrchestratorService**: Routes messages to the correct mode handler.
-- **AuthService**: Validates Cloudflare Access JWT or falls back to dev-mode email.
-- **UserService**: User CRUD; enforces credit deduction and per-user agent limits.
-- **SettingsService**: Manages the list of allowed LLM models and configurable prompt templates.
-- **LLMLogService**: Records every LLM API call for auditing and debugging.
-- **VectorStoreService**: Manages ChromaDB collections (one per agent); handles upsert and similarity search.
-- **LLMService**: Calls external LLM APIs via LiteLLM; supports OpenAI and Anthropic-compatible providers.
+### 2.4 Credits Domain
+- credits_per_iteration: charged at chat request level
+- credits_per_process: charged per successful LLM call only when agent uses provider default key
+- Credits are visible in sidebar for all users
 
-### 2.4 MCP Agent Layer
-Each agent exposes three tools conforming to the Model Context Protocol pattern:
-```
-search_memory(query: str, n_results: int) → List[str]
-add_memory(text: str, metadata: dict)     → None
-generate_response(messages: List[dict])   → str (streaming)
-```
-The orchestrator calls these tools when coordinating slave agents.
+## 3. API Surface (selected)
 
-### 2.5 Orchestrator Modes
+- /agents
+  - POST, GET, PUT /{id}, DELETE /{id}, PATCH /{id}/orchestrator
+- /conversations
+  - POST, GET, GET /{id}, DELETE /{id}, PATCH /{id}/title
+- /chat
+  - POST /send (SSE)
+- /settings
+  - GET, PUT
+  - GET/POST/PUT/DELETE /models
+  - POST/DELETE /default-keys
+  - GET /prompts, PUT /prompts/{key}
+- /users
+  - /me, list, patch
+- /logs
+  - /llm
 
-| Mode | Behaviour |
-|------|-----------|
-| **broadcast** | Sends an explicit broadcast instruction simultaneously to all slave agents; aggregates their individual responses. |
-| **orchestrate** | Discovers each slave's speciality, builds a sequential execution plan, and synthesises a final answer. |
-| **mediator** | Runs a structured debate between exactly two slave agents; decides speaking order each round; produces a balanced assessment. |
+## 4. Data Model Notes
 
-### 2.6 Data Models
+### 4.1 app_settings
+- available_models_json: model catalog with enabled flag
+- credits_per_process: integer >= 0
+- default_api_keys_json: encrypted provider key map
 
-**Agent**
-```
-id                    UUID  PK
-owner_id              UUID  FK → users (nullable)
-name                  str   unique per owner
-model                 str
-api_key_encrypted     str   (Fernet-encrypted)
-agent_type            str   (orchestrator | slave)
-orchestrator_mode     str   (broadcast | orchestrate | mediator)
-is_orchestrator       bool
-purpose               text
-instructions          text
-allowed_slave_ids     JSON  (orchestrators only)
-orchestration_rules   JSON  (orchestrators only)
-created_at            datetime
-```
+### 4.2 agents
+- use_default_key: boolean
+- allowed_slave_ids_json: orchestrator target constraints
+- orchestration_rules_json exists for backward compatibility but is no longer used by API/UI
 
-**User**
-```
-id            UUID  PK
-email         str   unique
-role          str   (user | admin)
-credits       int
-agent_limit   int   (-1 = unlimited)
-is_active     bool
-is_blocked    bool
-created_at    datetime
-last_seen_at  datetime
-```
+## 5. Chat UX Notes
 
-**Conversation**
-```
-id               UUID  PK
-owner_id         UUID  FK → users
-orchestrator_id  UUID  FK → agents
-title            str
-agent_ids        JSON  (list of participating slave agent IDs)
-created_at       datetime
-updated_at       datetime
-```
+- Removed from UI:
+  - Instruction target: Orchestrator
+  - To: Orchestrator: <name>
+- Chat still shows orchestrator name in conversation header context
 
-**Message**
-```
-id               UUID  PK
-conversation_id  UUID  FK → conversations
-role             str   (user | assistant | system)
-content          str
-mode             str   (orchestrator | slave | mediator | …)
-agent_id         UUID  FK → agents (nullable)
-created_at       datetime
-```
+## 6. Security Highlights
 
-**AppSettings**
-```
-id               UUID  PK
-allowed_models   JSON  (list of ModelOption objects)
-updated_at       datetime
-```
-
-**PromptConfig**
-```
-key          str  PK  (e.g. broadcast_default_purpose)
-value        text
-description  text
-updated_at   datetime
-```
-
-**LLMLog**
-```
-id                UUID  PK
-agent_id          UUID  FK → agents (nullable)
-agent_name        str
-model             str
-request_payload   text  (JSON)
-response_payload  text  (JSON, nullable)
-error             text  (nullable)
-created_at        datetime
-```
-
-### 2.7 Vector Store
-- **Engine**: ChromaDB (embedded, persistent)
-- **Collections**: one per agent, named `agent_{agent_id}`
-- **Embedding**: `all-MiniLM-L6-v2` (sentence-transformers, local)
-- **Documents**: stored as `{role}: {content}` pairs; scoped optionally by `session_id`
-
-### 2.8 Authentication & Access Control
-- **Production**: Cloudflare Access issues a signed JWT (`CF_Authorization` cookie / `Cf-Access-Jwt-Assertion` header). The backend validates the JWT when `CF_TEAM_DOMAIN` is set.
-- **Development**: When `CF_TEAM_DOMAIN` is blank, the backend accepts an `X-Dev-User-Email` header or falls back to `DEV_USER_EMAIL`.
-- **Roles**: `admin` (full access, unlimited credits) and `user` (limited by credits and agent count). New users are inactive until an admin approves them (unless they match `ADMIN_EMAILS`).
-- **Impersonation**: Admins can impersonate any user via the `X-Impersonate-User-Id` header (enforced server-side).
-
-### 2.9 Security
-- Agent API keys are encrypted at rest using `cryptography.fernet` with a server-side `SECRET_KEY`.
-- All sensitive configuration is supplied via environment variables; no secrets are stored in source code.
-
-## 3. Technology Stack
-
-| Layer | Technology |
-|-------|-----------|
-| Frontend | React 18, TypeScript, Vite, TailwindCSS, Axios |
-| Backend | Python 3.11, FastAPI, SQLAlchemy (async), Pydantic v2 |
-| LLM Integration | LiteLLM |
-| Vector DB | ChromaDB (embedded) |
-| Embeddings | sentence-transformers (`all-MiniLM-L6-v2`) |
-| Relational DB | SQLite (async via `aiosqlite`) |
-| Containerisation | Docker, Docker Compose |
-| Auth (production) | Cloudflare Access JWT |
-
-## 4. Data Flow
-
-### 4.1 Broadcast Mode
-```
-User → POST /chat/send (mode=slave, broadcast_instructions=…)
-  → OrchestratorService.broadcast(message, slave_agent_ids)
-    → For each slave agent (parallel):
-        AgentMCP.search_memory(message)           # retrieve context
-        AgentMCP.generate_response(ctx+message)   # call LLM
-        AgentMCP.add_memory(message + response)   # persist
-      → collect all responses
-  → OrchestratorMCP.add_memory(aggregated)        # orchestrator stores summary
-  → Stream SSE chunks to frontend
-```
-
-### 4.2 Orchestrate Mode
-```
-User → POST /chat/send (mode=orchestrator)
-  → OrchestratorService.orchestrate(message, orchestrator_instructions)
-    → Discover slave specialities
-    → Build sequential execution plan
-    → For each relevant slave agent (in order):
-        AgentMCP.search_memory(message)
-        AgentMCP.generate_response(ctx+prev_output)
-        AgentMCP.add_memory(exchange)
-    → OrchestratorMCP.generate_response(all_outputs)  # synthesise
-    → OrchestratorMCP.add_memory(exchange)
-  → Stream SSE chunks to frontend
-```
-
-### 4.3 Mediator Mode
-```
-User → POST /chat/send (mode=mediator, orchestrator_instructions=…)
-  → OrchestratorService.mediate(topic, two_slave_agents, mediator_instructions)
-    → Multiple rounds:
-        Decide speaking order based on current debate state
-        SlaveA.generate_response(context) or SlaveB.generate_response(context)
-        Accumulate exchange
-    → OrchestratorMCP.generate_response(full_debate)  # final assessment
-  → Stream SSE chunks to frontend
-```
+- API keys encrypted at rest with Fernet derived from SECRET_KEY
+- Provider default keys validated against known providers from model catalog
+- Admin-only impersonation, enforced server-side
+- Production auth via Cloudflare Access JWT (when CF_TEAM_DOMAIN is configured)

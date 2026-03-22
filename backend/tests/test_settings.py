@@ -9,23 +9,30 @@ async def test_get_settings_returns_provider_catalog(client: AsyncClient):
     data = resp.json()
     providers = {option["provider"] for option in data["available_models"]}
     assert {"OpenAI", "Anthropic", "Gemini", "Grok"}.issubset(providers)
-    assert len(data["allowed_models"]) > 0
+    assert all("enabled" in option for option in data["available_models"])
 
 
 @pytest.mark.asyncio
-async def test_update_settings_rejects_unknown_model(client: AsyncClient):
-    resp = await client.put("/settings", json={"allowed_models": ["unknown/provider-model"]})
-    assert resp.status_code == 400
+async def test_update_settings_updates_credits_only(client: AsyncClient):
+    resp = await client.put("/settings", json={"credits_per_process": 3})
+    assert resp.status_code == 200
+    assert resp.json()["credits_per_process"] == 3
 
 
 @pytest.mark.asyncio
-async def test_create_agent_respects_allowed_models(client: AsyncClient):
-    update = await client.put("/settings", json={"allowed_models": ["openai/gpt-5.2"]})
-    assert update.status_code == 200
+async def test_create_agent_respects_enabled_model_catalog(client: AsyncClient):
+    disable = await client.put("/settings/models", json={
+        "current_model": "openai/gpt-5.2",
+        "provider": "OpenAI",
+        "label": "GPT-5.2",
+        "model": "openai/gpt-5.2",
+        "enabled": False,
+    })
+    assert disable.status_code == 200
 
     allowed = await client.post("/agents", json={
         "name": "Allowed",
-        "model": "GPT-5.2",
+        "model": "gpt-4o",
         "api_key": "sk-test",
         "agent_type": "orchestrator",
     })
@@ -33,7 +40,7 @@ async def test_create_agent_respects_allowed_models(client: AsyncClient):
 
     blocked = await client.post("/agents", json={
         "name": "Blocked",
-        "model": "claude-3-5-sonnet",
+        "model": "gpt-5.2",
         "api_key": "sk-test-2",
         "agent_type": "slave",
     })
@@ -46,19 +53,28 @@ async def test_model_catalog_can_add_edit_delete_and_enable(client: AsyncClient)
         "provider": "OpenAI",
         "label": "GPT Test",
         "model": "openai/gpt-test",
+        "enabled": True,
     })
     assert add.status_code == 200
     assert any(option["model"] == "openai/gpt-test" for option in add.json()["available_models"])
 
-    enable = await client.put("/settings", json={"allowed_models": ["openai/gpt-test"]})
-    assert enable.status_code == 200
-    assert enable.json()["allowed_models"] == ["openai/gpt-test"]
+    disable = await client.put("/settings/models", json={
+        "current_model": "openai/gpt-test",
+        "provider": "OpenAI",
+        "label": "GPT Test",
+        "model": "openai/gpt-test",
+        "enabled": False,
+    })
+    assert disable.status_code == 200
+    disabled = next(option for option in disable.json()["available_models"] if option["model"] == "openai/gpt-test")
+    assert disabled["enabled"] is False
 
     edit = await client.put("/settings/models", json={
         "current_model": "openai/gpt-test",
         "provider": "OpenAI",
         "label": "GPT Test Edited",
         "model": "openai/gpt-test",
+        "enabled": True,
     })
     assert edit.status_code == 200
     edited = next(option for option in edit.json()["available_models"] if option["model"] == "openai/gpt-test")
@@ -75,11 +91,9 @@ async def test_model_catalog_cannot_delete_model_used_by_agent(client: AsyncClie
         "provider": "OpenAI",
         "label": "GPT Keep",
         "model": "openai/gpt-keep",
+        "enabled": True,
     })
     assert add.status_code == 200
-
-    update = await client.put("/settings", json={"allowed_models": ["openai/gpt-keep"]})
-    assert update.status_code == 200
 
     agent = await client.post("/agents", json={
         "name": "KeepAgent",
@@ -91,3 +105,14 @@ async def test_model_catalog_cannot_delete_model_used_by_agent(client: AsyncClie
 
     delete = await client.delete("/settings/models", params={"model": "openai/gpt-keep"})
     assert delete.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_default_provider_key_crud(client: AsyncClient):
+    set_resp = await client.post("/settings/default-keys", json={"provider": "OpenAI", "api_key": "sk-provider"})
+    assert set_resp.status_code == 200
+    assert "openai" in set_resp.json()["default_key_providers"]
+
+    delete_resp = await client.delete("/settings/default-keys", params={"provider": "OpenAI"})
+    assert delete_resp.status_code == 200
+    assert "openai" not in delete_resp.json()["default_key_providers"]

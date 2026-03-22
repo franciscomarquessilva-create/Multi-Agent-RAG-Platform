@@ -51,9 +51,6 @@ function InternalMessageBox({
 
 function MessageBubble({ msg }: { msg: Message }) {
   const isUser = msg.role === 'user'
-  const userTargetLabel = isUser && msg.mode
-    ? (msg.agent_name || (msg.mode === 'orchestrator' ? 'Orchestrator' : 'Selected slaves'))
-    : null
 
   if (!isUser && msg.message_type === 'internal') {
     return (
@@ -69,9 +66,6 @@ function MessageBubble({ msg }: { msg: Message }) {
     <div className={`flex flex-col gap-1 ${isUser ? 'items-end' : 'items-start'} mb-4`}>
       {!isUser && msg.agent_name && (
         <AgentBadge name={msg.agent_name} />
-      )}
-      {isUser && userTargetLabel && (
-        <span className="text-xs text-blue-300">To: {userTargetLabel}</span>
       )}
       <div
         className={`max-w-2xl px-4 py-2 rounded-2xl text-sm whitespace-pre-wrap break-words ${

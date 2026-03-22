@@ -7,38 +7,33 @@ export interface Agent {
   instructions: string
   orchestrator_mode: 'broadcast' | 'orchestrate' | 'mediator' | null
   allowed_slave_ids: string[]
-  orchestration_rules: OrchestrationRule[]
   is_orchestrator: boolean
+  use_default_key: boolean
   created_at: string
-}
-
-export interface OrchestrationRule {
-  slave_agent_id: string
-  rule: string
 }
 
 export interface AgentCreate {
   name: string
   model: string
-  api_key: string
+  api_key?: string
+  use_default_key: boolean
   agent_type: 'orchestrator' | 'slave'
   purpose: string
   instructions: string
   orchestrator_mode?: 'broadcast' | 'orchestrate' | 'mediator'
   allowed_slave_ids: string[]
-  orchestration_rules: OrchestrationRule[]
 }
 
 export interface AgentUpdate {
   name?: string
   model?: string
   api_key?: string
+  use_default_key?: boolean
   agent_type?: 'orchestrator' | 'slave'
   purpose?: string
   instructions?: string
   orchestrator_mode?: 'broadcast' | 'orchestrate' | 'mediator'
   allowed_slave_ids?: string[]
-  orchestration_rules?: OrchestrationRule[]
 }
 
 export interface Conversation {
@@ -154,9 +149,11 @@ export interface ModelOption {
   provider: string
   label: string
   model: string
+  enabled: boolean
 }
 
 export interface AppSettings {
-  allowed_models: string[]
   available_models: ModelOption[]
+  credits_per_process: number
+  default_key_providers: string[]
 }

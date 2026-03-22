@@ -160,7 +160,6 @@ async def test_orchestrator_internal_messages_are_saved_as_visible_messages(clie
 
     await client.put(f"/agents/{orch_id}", json={
         "allowed_slave_ids": [slave_id],
-        "orchestration_rules": [],
     })
 
     rc = await client.post("/conversations", json={"title": "Iterative", "orchestrator_id": orch_id, "agent_ids": [slave_id]})
@@ -212,7 +211,6 @@ async def test_orchestrator_reuses_cached_specialty_and_skips_redundant_discover
 
     await client.put(f"/agents/{orch_id}", json={
         "allowed_slave_ids": [slave_id],
-        "orchestration_rules": [],
     })
 
     rc = await client.post("/conversations", json={"title": "Cached", "orchestrator_id": orch_id, "agent_ids": [slave_id]})
@@ -270,7 +268,6 @@ async def test_broadcast_orchestrator_separates_slave_and_private_instructions(c
     await client.put(f"/agents/{orch_id}", json={
         "orchestrator_mode": "broadcast",
         "allowed_slave_ids": [slave_id],
-        "orchestration_rules": [],
     })
 
     rc = await client.post("/conversations", json={"title": "Broadcast", "orchestrator_id": orch_id, "agent_ids": [slave_id]})
@@ -403,7 +400,6 @@ async def test_mediator_hides_private_instructions_from_slave_agents(client: Asy
     await client.put(f"/agents/{orch_id}", json={
         "orchestrator_mode": "mediator",
         "allowed_slave_ids": [a_id, b_id],
-        "orchestration_rules": [],
     })
 
     rc = await client.post("/conversations", json={

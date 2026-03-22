@@ -12,8 +12,8 @@ const makeAgent = (id: string, name: string, isOrch = false): Agent => ({
   instructions: '',
   orchestrator_mode: isOrch ? 'orchestrate' : null,
   allowed_slave_ids: [],
-  orchestration_rules: [],
   is_orchestrator: isOrch,
+  use_default_key: false,
   created_at: new Date().toISOString(),
 })
 
@@ -50,7 +50,7 @@ describe('Chat', () => {
         agents={[makeAgent('1', 'Orch', true)]}
       />
     )
-    expect(screen.getByText('Instruction target: Orchestrator')).toBeDefined()
+    expect(screen.queryByText('Instruction target: Orchestrator')).toBeNull()
   })
 
   it('message_appears_after_send', () => {

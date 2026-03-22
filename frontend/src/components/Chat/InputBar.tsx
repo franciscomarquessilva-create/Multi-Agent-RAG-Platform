@@ -73,8 +73,6 @@ export default function InputBar({
     <div className="border-t border-gray-700 px-4 py-3 bg-gray-800">
       {/* Orchestrator controls */}
       <div className="flex items-center gap-2 mb-2">
-        <span className="text-xs text-gray-400">Instruction target: Orchestrator</span>
-
         {!isBroadcast && (
           <div className="ml-auto flex items-center gap-2">
           <label className="text-xs text-gray-400" htmlFor="iterations-input">Max iterations</label>

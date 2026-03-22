@@ -89,16 +89,16 @@ export default function Sidebar({
 
       {/* Footer */}
       <div className="p-3 border-t border-gray-700 space-y-1">
-        {/* Credits badge for regular users */}
-        {currentUser && currentUser.role !== 'admin' && (
+        {/* Credits badge — visible to all users */}
+        {currentUser && (
           <div className="px-3 py-1.5 text-xs text-gray-400 flex justify-between">
             <span>Credits</span>
             <span className={currentUser.credits <= 10 ? 'text-red-400 font-semibold' : 'text-gray-300 font-semibold'}>
-              {currentUser.credits}
+              {currentUser.role === 'admin' && !impersonatingUserEmail ? '∞' : currentUser.credits}
             </span>
           </div>
         )}
-        {currentUser?.role === 'admin' && (
+        {currentUser?.role === 'admin' && !impersonatingUserEmail && (
           <div className="px-3 py-1.5 text-xs text-amber-400 font-semibold">Admin</div>
         )}
 
@@ -109,28 +109,32 @@ export default function Sidebar({
           <Settings size={16} />
           Manage Agents
         </button>
-        <button
-          onClick={onOpenSettings}
-          className="w-full flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-gray-700 transition-colors text-sm text-gray-300"
-        >
-          <SlidersHorizontal size={16} />
-          Settings
-        </button>
-        <button
-          onClick={onOpenAudit}
-          className="w-full flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-gray-700 transition-colors text-sm text-gray-300"
-        >
-          <FileText size={16} />
-          Audit
-        </button>
-        {onOpenAdmin && (
-          <button
-            onClick={onOpenAdmin}
-            className="w-full flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-gray-700 transition-colors text-sm text-amber-400"
-          >
-            <ShieldCheck size={16} />
-            Admin Panel
-          </button>
+        {!impersonatingUserEmail && (
+          <>
+            <button
+              onClick={onOpenSettings}
+              className="w-full flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-gray-700 transition-colors text-sm text-gray-300"
+            >
+              <SlidersHorizontal size={16} />
+              Settings
+            </button>
+            <button
+              onClick={onOpenAudit}
+              className="w-full flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-gray-700 transition-colors text-sm text-gray-300"
+            >
+              <FileText size={16} />
+              Audit
+            </button>
+            {onOpenAdmin && (
+              <button
+                onClick={onOpenAdmin}
+                className="w-full flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-gray-700 transition-colors text-sm text-amber-400"
+              >
+                <ShieldCheck size={16} />
+                Admin Panel
+              </button>
+            )}
+          </>
         )}
         <button
           onClick={onLogout}

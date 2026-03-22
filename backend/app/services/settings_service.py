@@ -206,13 +206,6 @@ DEFAULT_MODEL_OPTIONS: list[ModelOption] = [
     ModelOption(provider="Grok", label="Grok 2", model="xai/grok-2"),
     ModelOption(provider="Grok", label="Grok 2 Latest", model="xai/grok-2-latest"),
 ]
-DEFAULT_ALLOWED_MODELS = [
-    "openai/gpt-5.2",
-    "openai/gpt-4o",
-    "anthropic/claude-3-5-sonnet",
-    "gemini/gemini-1.5-pro",
-    "xai/grok-2",
-]
 SETTINGS_ROW_ID = "default"
 
 
@@ -265,7 +258,14 @@ def _parse_model_options(raw: str | None) -> list[ModelOption]:
         parsed = json.loads(raw)
         if not isinstance(parsed, list):
             return []
-        return [ModelOption(**item) for item in parsed if isinstance(item, dict)]
+        options: list[ModelOption] = []
+        for item in parsed:
+            if not isinstance(item, dict):
+                continue
+            if "enabled" not in item:
+                item["enabled"] = True
+            options.append(ModelOption(**item))
+        return options
     except Exception:
         return []
 
@@ -278,7 +278,14 @@ def _dedupe_options(options: list[ModelOption]) -> list[ModelOption]:
         if key in seen:
             continue
         seen.add(key)
-        deduped.append(ModelOption(provider=option.provider.strip(), label=option.label.strip(), model=key))
+        deduped.append(
+            ModelOption(
+                provider=option.provider.strip(),
+                label=option.label.strip(),
+                model=key,
+                enabled=bool(option.enabled),
+            )
+        )
     return deduped
 
 
@@ -290,7 +297,6 @@ async def _get_or_create_settings_row(db: AsyncSession) -> AppSettings:
 
     row = AppSettings(
         id=SETTINGS_ROW_ID,
-        allowed_models_json=json.dumps(DEFAULT_ALLOWED_MODELS),
         available_models_json=_serialize_model_options(DEFAULT_MODEL_OPTIONS),
     )
     db.add(row)
@@ -306,16 +312,12 @@ async def _ensure_model_catalog(db: AsyncSession, row: AppSettings) -> list[Mode
 
     options = _dedupe_options(DEFAULT_MODEL_OPTIONS)
     row.available_models_json = _serialize_model_options(options)
-    allowed_set = {option.model for option in options}
-    existing_allowed = [normalize_model_name(m) for m in json.loads(row.allowed_models_json or "[]")]
-    filtered_allowed = [m for m in existing_allowed if m in allowed_set] or [options[0].model]
-    row.allowed_models_json = json.dumps(filtered_allowed)
     await db.commit()
     await db.refresh(row)
     return options
 
 
-def _normalize_option(provider: str, label: str, model: str) -> ModelOption:
+def _normalize_option(provider: str, label: str, model: str, enabled: bool = True) -> ModelOption:
     provider_clean = provider.strip()
     label_clean = label.strip()
     model_clean = normalize_model_name(model)
@@ -325,42 +327,26 @@ def _normalize_option(provider: str, label: str, model: str) -> ModelOption:
         raise HTTPException(status_code=400, detail="Label is required")
     if not model_clean:
         raise HTTPException(status_code=400, detail="Model identifier is required")
-    return ModelOption(provider=provider_clean, label=label_clean, model=model_clean)
+    return ModelOption(provider=provider_clean, label=label_clean, model=model_clean, enabled=bool(enabled))
 
 
 async def get_app_settings(db: AsyncSession) -> AppSettingsResponse:
     row = await _get_or_create_settings_row(db)
     available_models = await _ensure_model_catalog(db, row)
-    allowed_set = {option.model for option in available_models}
-    allowed_models = [normalize_model_name(m) for m in json.loads(row.allowed_models_json or "[]") if m]
-    allowed_models = [m for m in allowed_models if m in allowed_set]
-    if not allowed_models and available_models:
-        allowed_models = [available_models[0].model]
-        row.allowed_models_json = json.dumps(allowed_models)
-        await db.commit()
+    default_key_providers = sorted(_get_raw_default_keys(row).keys())
     return AppSettingsResponse(
-        allowed_models=allowed_models,
         available_models=available_models,
+        credits_per_process=max(0, getattr(row, "credits_per_process", 1) or 1),
+        default_key_providers=default_key_providers,
     )
 
 
 async def update_app_settings(
     db: AsyncSession,
-    allowed_models: list[str],
     credits_per_process: int | None = None,
 ) -> AppSettingsResponse:
     row = await _get_or_create_settings_row(db)
-    available_models = await _ensure_model_catalog(db, row)
-
-    normalized = [normalize_model_name(model) for model in allowed_models if model.strip()]
-    allowed_set = {option.model for option in available_models}
-    invalid = [model for model in normalized if model not in allowed_set]
-    if invalid:
-        raise HTTPException(status_code=400, detail=f"Unsupported models: {', '.join(invalid)}")
-    if not normalized:
-        raise HTTPException(status_code=400, detail="At least one model must be enabled")
-
-    row.allowed_models_json = json.dumps(normalized)
+    await _ensure_model_catalog(db, row)
     if credits_per_process is not None and credits_per_process >= 0:
         row.credits_per_process = max(0, credits_per_process)
     await db.commit()
@@ -373,10 +359,10 @@ async def list_available_models(db: AsyncSession) -> list[ModelOption]:
     return await _ensure_model_catalog(db, row)
 
 
-async def add_available_model(db: AsyncSession, *, provider: str, label: str, model: str) -> AppSettingsResponse:
+async def add_available_model(db: AsyncSession, *, provider: str, label: str, model: str, enabled: bool = True) -> AppSettingsResponse:
     row = await _get_or_create_settings_row(db)
     options = await _ensure_model_catalog(db, row)
-    new_option = _normalize_option(provider, label, model)
+    new_option = _normalize_option(provider, label, model, enabled)
 
     if any(option.model == new_option.model for option in options):
         raise HTTPException(status_code=409, detail=f"Model '{new_option.model}' already exists")
@@ -394,12 +380,13 @@ async def update_available_model(
     provider: str,
     label: str,
     model: str,
+    enabled: bool,
 ) -> AppSettingsResponse:
     row = await _get_or_create_settings_row(db)
     options = await _ensure_model_catalog(db, row)
 
     current_key = normalize_model_name(current_model)
-    next_option = _normalize_option(provider, label, model)
+    next_option = _normalize_option(provider, label, model, enabled)
     idx = next((i for i, option in enumerate(options) if option.model == current_key), -1)
     if idx < 0:
         raise HTTPException(status_code=404, detail=f"Model '{current_key}' not found")
@@ -413,15 +400,8 @@ async def update_available_model(
             raise HTTPException(status_code=400, detail="Cannot rename model identifier while it is used by existing agents")
 
     options[idx] = next_option
+    options[idx].enabled = bool(enabled)
     row.available_models_json = _serialize_model_options(options)
-
-    allowed = [normalize_model_name(m) for m in json.loads(row.allowed_models_json or "[]") if m]
-    updated_allowed = [next_option.model if m == current_key else m for m in allowed]
-    allowed_set = {opt.model for opt in options}
-    updated_allowed = [m for m in updated_allowed if m in allowed_set]
-    if not updated_allowed and options:
-        updated_allowed = [options[0].model]
-    row.allowed_models_json = json.dumps(updated_allowed)
 
     await db.commit()
     return await get_app_settings(db)
@@ -446,19 +426,17 @@ async def delete_available_model(db: AsyncSession, *, model: str) -> AppSettings
     updated_options = [option for option in options if option.model != key]
     row.available_models_json = _serialize_model_options(updated_options)
 
-    allowed = [normalize_model_name(m) for m in json.loads(row.allowed_models_json or "[]") if m]
-    updated_allowed = [m for m in allowed if m != key]
-    if not updated_allowed and updated_options:
-        updated_allowed = [updated_options[0].model]
-    row.allowed_models_json = json.dumps(updated_allowed)
-
     await db.commit()
     return await get_app_settings(db)
 
 
-async def is_model_allowed(db: AsyncSession, model: str) -> bool:
+async def is_model_enabled(db: AsyncSession, model: str) -> bool:
+    normalized = normalize_model_name(model)
     settings = await get_app_settings(db)
-    return normalize_model_name(model) in set(settings.allowed_models)
+    for option in settings.available_models:
+        if option.model == normalized:
+            return bool(option.enabled)
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -523,43 +501,58 @@ async def update_prompt_config(db: AsyncSession, key: str, value: str) -> Prompt
 
 
 # ---------------------------------------------------------------------------
-# Default API key management (per model, stored encrypted in AppSettings)
+# Default API key management (per provider, stored encrypted in AppSettings)
 # ---------------------------------------------------------------------------
 
+def _normalize_provider(provider: str) -> str:
+    return provider.strip().lower()
+
+
+def provider_from_model(model: str) -> str:
+    normalized = normalize_model_name(model)
+    if "/" in normalized:
+        provider, _ = normalized.split("/", 1)
+        return _normalize_provider(provider)
+    return _normalize_provider(normalized)
+
 async def get_default_api_keys_map(db: AsyncSession) -> dict[str, str]:
-    """Return {model: decrypted_key} for all models with a default key configured."""
+    """Return {provider: decrypted_key} for providers with a default key configured."""
     row = await _get_or_create_settings_row(db)
     raw_map = _get_raw_default_keys(row)
     result: dict[str, str] = {}
-    for model_key, enc_key in raw_map.items():
+    for provider_key, enc_key in raw_map.items():
         try:
-            result[model_key] = _decrypt_default_key(enc_key)
+            result[provider_key] = _decrypt_default_key(enc_key)
         except Exception:
-            logger.warning("Failed to decrypt default API key for model %s", model_key)
+            logger.warning("Failed to decrypt default API key for provider %s", provider_key)
     return result
 
 
-async def set_default_api_key(db: AsyncSession, *, model: str, api_key: str) -> AppSettingsResponse:
-    """Store an encrypted default API key for the given model."""
+async def set_default_api_key(db: AsyncSession, *, provider: str, api_key: str) -> AppSettingsResponse:
+    """Store an encrypted default API key for the given provider."""
     row = await _get_or_create_settings_row(db)
+    options = await _ensure_model_catalog(db, row)
     keys_map = _get_raw_default_keys(row)
-    model_key = normalize_model_name(model)
-    if not model_key:
-        raise HTTPException(status_code=400, detail="Model identifier is required")
+    provider_key = _normalize_provider(provider)
+    if not provider_key:
+        raise HTTPException(status_code=400, detail="Provider is required")
+    known_providers = {_normalize_provider(option.provider) for option in options}
+    if provider_key not in known_providers:
+        raise HTTPException(status_code=400, detail=f"Unknown provider '{provider_key}'")
     if not api_key or not api_key.strip():
         raise HTTPException(status_code=400, detail="API key cannot be empty")
-    keys_map[model_key] = _encrypt_default_key(api_key.strip())
+    keys_map[provider_key] = _encrypt_default_key(api_key.strip())
     row.default_api_keys_json = json.dumps(keys_map)
     await db.commit()
     return await get_app_settings(db)
 
 
-async def delete_default_api_key(db: AsyncSession, *, model: str) -> AppSettingsResponse:
-    """Remove the default API key for the given model."""
+async def delete_default_api_key(db: AsyncSession, *, provider: str) -> AppSettingsResponse:
+    """Remove the default API key for the given provider."""
     row = await _get_or_create_settings_row(db)
     keys_map = _get_raw_default_keys(row)
-    model_key = normalize_model_name(model)
-    keys_map.pop(model_key, None)
+    provider_key = _normalize_provider(provider)
+    keys_map.pop(provider_key, None)
     row.default_api_keys_json = json.dumps(keys_map)
     await db.commit()
     return await get_app_settings(db)

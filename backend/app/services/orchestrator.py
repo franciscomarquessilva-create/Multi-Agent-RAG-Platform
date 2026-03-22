@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import logging
 
 from app.services.agent_service import get_agent, decrypt_api_key, get_orchestrator_by_id
-from app.services.settings_service import get_all_prompt_values, PROMPT_DEFAULTS, get_default_api_keys_map, get_credits_per_process
+from app.services.settings_service import get_all_prompt_values, PROMPT_DEFAULTS, get_default_api_keys_map, get_credits_per_process, provider_from_model
 from app.mcp.agent_server import AgentMCPServer
 
 
@@ -35,7 +35,7 @@ def _make_server(
 ) -> AgentMCPServer:
     use_default = getattr(agent, "use_default_key", False)
     if use_default and default_keys:
-        api_key = default_keys.get(agent.model, "")
+        api_key = default_keys.get(provider_from_model(agent.model), "")
     else:
         api_key = decrypt_api_key(agent.api_key_encrypted)
         use_default = False
@@ -200,7 +200,7 @@ async def handle_slave_broadcast(
             logger.warning("Skipping unavailable slave agent %s", agent_id)
             continue
 
-        server = _make_server(agent, conversation_id)
+        server = _make_server(agent, conversation_id, default_keys=default_keys, owner_id=owner_id, credits_per_process=credits_pp)
         slave_system = slave_prompt_template.format(
             agent_name=agent.name,
             purpose=agent.purpose or "Not provided",
@@ -261,6 +261,9 @@ async def _handle_broadcast_orchestrator(
     conversation_id: str,
     broadcast_instructions: str | None = None,
     orchestrator_instructions: str | None = None,
+    default_keys: dict | None = None,
+    owner_id: str | None = None,
+    credits_per_process: int = 1,
 ) -> AsyncIterator[str]:
     """
     Broadcast orchestrator:
@@ -336,7 +339,7 @@ async def _handle_broadcast_orchestrator(
             logger.warning("Skipping unavailable slave agent %s", agent_id)
             continue
 
-        server = _make_server(agent, conversation_id)
+        server = _make_server(agent, conversation_id, default_keys=default_keys, owner_id=owner_id, credits_per_process=credits_per_process)
         slave_system = slave_prompt_template.format(
             agent_name=agent.name,
             purpose=agent.purpose or "Not provided",
@@ -446,6 +449,9 @@ async def _handle_orchestrate_orchestrator(
     prompt_fn,
     *,
     conversation_id: str,
+    default_keys: dict | None = None,
+    owner_id: str | None = None,
+    credits_per_process: int = 1,
 ) -> AsyncIterator[str]:
     """
     Orchestrate orchestrator:
@@ -498,7 +504,7 @@ async def _handle_orchestrate_orchestrator(
                 )
                 continue
 
-            server = _make_server(agent, conversation_id)
+            server = _make_server(agent, conversation_id, default_keys=default_keys, owner_id=owner_id, credits_per_process=credits_per_process)
             spec_messages = [
                 {
                     "role": "system",
@@ -612,7 +618,7 @@ async def _handle_orchestrate_orchestrator(
             logger.warning("Skipping unavailable agent %s in execution", agent_id)
             continue
 
-        server = _make_server(agent, conversation_id)
+        server = _make_server(agent, conversation_id, default_keys=default_keys, owner_id=owner_id, credits_per_process=credits_per_process)
         slave_system = slave_task_template.format(
             agent_name=agent.name,
             purpose=agent.purpose or "Not provided",
@@ -713,6 +719,9 @@ async def _handle_mediator_orchestrator(
     conversation_id: str,
     iterations: int,
     orchestrator_instructions: str | None = None,
+    default_keys: dict | None = None,
+    owner_id: str | None = None,
+    credits_per_process: int = 1,
 ) -> AsyncIterator[str]:
     private_instructions = _strip_or_none(orchestrator_instructions)
 
@@ -805,7 +814,7 @@ async def _handle_mediator_orchestrator(
         for speaker_name in ordered_names:
             speaker = name_to_agent[speaker_name]
             opponent = next(agent for agent in debate_agents if agent.name != speaker_name)
-            speaker_server = _make_server(speaker, conversation_id)
+            speaker_server = _make_server(speaker, conversation_id, default_keys=default_keys, owner_id=owner_id, credits_per_process=credits_per_process)
             transcript_text = _join_memory_docs(debate_transcript) or "No debate turns yet."
             speaker_system = slave_system_template.format(
                 agent_name=speaker.name,
@@ -928,6 +937,7 @@ async def handle_orchestrator_mode(
     iterations: int = 1,
     broadcast_instructions: str | None = None,
     orchestrator_instructions: str | None = None,
+    owner_id: str | None = None,
 ) -> AsyncIterator[str]:
     """
     Entry point for orchestrator mode.
@@ -944,7 +954,9 @@ async def handle_orchestrator_mode(
         yield f"data: {json.dumps({'done': True})}\n\n"
         return
 
-    orch_server = _make_server(orchestrator, conversation_id)
+    default_keys = await get_default_api_keys_map(db)
+    credits_pp = await get_credits_per_process(db)
+    orch_server = _make_server(orchestrator, conversation_id, default_keys=default_keys, owner_id=owner_id, credits_per_process=credits_pp)
 
     prompt_values = await get_all_prompt_values(db)
 
@@ -966,6 +978,9 @@ async def handle_orchestrator_mode(
             conversation_id=conversation_id,
             iterations=iterations,
             orchestrator_instructions=orchestrator_instructions,
+            default_keys=default_keys,
+            owner_id=owner_id,
+            credits_per_process=credits_pp,
         ):
             yield chunk
         return
@@ -1002,6 +1017,9 @@ async def handle_orchestrator_mode(
                 conversation_id=conversation_id,
                 broadcast_instructions=broadcast_instructions,
                 orchestrator_instructions=orchestrator_instructions,
+                default_keys=default_keys,
+                owner_id=owner_id,
+                credits_per_process=credits_pp,
             )
         else:
             chunk_stream = _handle_orchestrate_orchestrator(
@@ -1012,6 +1030,9 @@ async def handle_orchestrator_mode(
                 candidate_ids,
                 _p,
                 conversation_id=conversation_id,
+                default_keys=default_keys,
+                owner_id=owner_id,
+                credits_per_process=credits_pp,
             )
 
         async for chunk in chunk_stream:

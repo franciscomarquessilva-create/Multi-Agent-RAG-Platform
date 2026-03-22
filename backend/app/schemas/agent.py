@@ -3,11 +3,6 @@ from datetime import datetime
 from typing import Optional
 
 
-class OrchestrationRule(BaseModel):
-    slave_agent_id: str
-    rule: str = Field(..., max_length=2000)
-
-
 class AgentCreate(BaseModel):
     name: str = Field(..., max_length=100)
     model: str = Field(..., max_length=100)
@@ -18,7 +13,6 @@ class AgentCreate(BaseModel):
     instructions: str = Field(default="", max_length=8000)
     orchestrator_mode: Optional[str] = None  # broadcast | orchestrate | mediator
     allowed_slave_ids: list[str] = Field(default_factory=list, max_length=50)
-    orchestration_rules: list[OrchestrationRule] = Field(default_factory=list, max_length=50)
 
     @field_validator("name", "model")
     @classmethod
@@ -49,7 +43,6 @@ class AgentUpdate(BaseModel):
     instructions: Optional[str] = Field(default=None, max_length=8000)
     orchestrator_mode: Optional[str] = None
     allowed_slave_ids: Optional[list[str]] = Field(default=None, max_length=50)
-    orchestration_rules: Optional[list[OrchestrationRule]] = Field(default=None, max_length=50)
 
     @field_validator("name", "model")
     @classmethod
@@ -72,7 +65,6 @@ class AgentResponse(BaseModel):
     instructions: str
     orchestrator_mode: Optional[str]
     allowed_slave_ids: list[str]
-    orchestration_rules: list[OrchestrationRule]
     is_orchestrator: bool
     created_at: datetime
 

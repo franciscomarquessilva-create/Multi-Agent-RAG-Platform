@@ -56,7 +56,7 @@ export default function Chat({
         <h3 className="font-medium text-gray-200 truncate">{conversation.title}</h3>
         {conversationOrchestrator && (
           <p className="text-xs text-gray-500">
-            Orchestrator: <span className="text-blue-400">{conversationOrchestrator.name}</span>
+            <span className="text-blue-400">{conversationOrchestrator.name}</span>
             {' · '}
             {slaveAgents.length} slave agent{slaveAgents.length !== 1 ? 's' : ''}
           </p>
