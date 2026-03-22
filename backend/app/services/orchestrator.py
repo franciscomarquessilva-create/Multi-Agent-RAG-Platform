@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import logging
 
 from app.services.agent_service import get_agent, decrypt_api_key, get_orchestrator_by_id
-from app.services.settings_service import get_all_prompt_values, PROMPT_DEFAULTS
+from app.services.settings_service import get_all_prompt_values, PROMPT_DEFAULTS, get_default_api_keys_map, get_credits_per_process
 from app.mcp.agent_server import AgentMCPServer
 
 
@@ -25,13 +25,29 @@ SPECIALTY_MEMORY_PREFIX = "Agent specialty profile"
 NO_ORCHESTRATOR_INSTRUCTIONS = "No explicit orchestrator instructions were provided. Acknowledge completion without adding extra interpretation."
 
 
-def _make_server(agent, conversation_id: str | None = None) -> AgentMCPServer:
+def _make_server(
+    agent,
+    conversation_id: str | None = None,
+    *,
+    default_keys: dict[str, str] | None = None,
+    owner_id: str | None = None,
+    credits_per_process: int = 1,
+) -> AgentMCPServer:
+    use_default = getattr(agent, "use_default_key", False)
+    if use_default and default_keys:
+        api_key = default_keys.get(agent.model, "")
+    else:
+        api_key = decrypt_api_key(agent.api_key_encrypted)
+        use_default = False
     return AgentMCPServer(
         agent_id=agent.id,
         agent_name=agent.name,
         model=agent.model,
-        api_key=decrypt_api_key(agent.api_key_encrypted),
+        api_key=api_key,
         session_id=conversation_id,
+        owner_id=owner_id,
+        use_default_key=use_default,
+        credits_per_process=credits_per_process,
     )
 
 
@@ -152,6 +168,7 @@ async def handle_slave_broadcast(
     conversation_id: str,
     user_message: str,
     slave_agent_ids: List[str],
+    owner_id: str | None = None,
 ) -> AsyncIterator[str]:
     """
     Explicit slave-mode broadcast: called when the user selects mode='slave'.
@@ -165,7 +182,9 @@ async def handle_slave_broadcast(
         yield f"data: {json.dumps({'done': True})}\n\n"
         return
 
-    orch_server = _make_server(orchestrator, conversation_id)
+    default_keys = await get_default_api_keys_map(db)
+    credits_pp = await get_credits_per_process(db)
+    orch_server = _make_server(orchestrator, conversation_id, default_keys=default_keys, owner_id=owner_id, credits_per_process=credits_pp)
     prompt_values = await get_all_prompt_values(db)
 
     def _p(key: str) -> str:

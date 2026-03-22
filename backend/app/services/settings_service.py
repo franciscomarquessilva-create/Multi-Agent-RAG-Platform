@@ -1,4 +1,7 @@
 import json
+import base64
+import hashlib
+import logging
 from datetime import datetime, timezone
 
 from fastapi import HTTPException
@@ -10,6 +13,8 @@ from app.models.app_settings import AppSettings
 from app.models.prompt_config import PromptConfig  # noqa: registers table with Base
 from app.schemas.settings import AppSettingsResponse, ModelOption
 from app.services.llm_service import normalize_model_name
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -215,6 +220,44 @@ def _serialize_model_options(options: list[ModelOption]) -> str:
     return json.dumps([option.model_dump() for option in options])
 
 
+# ---------------------------------------------------------------------------
+# Fernet encryption helpers for default API keys
+# ---------------------------------------------------------------------------
+
+def _get_fernet():
+    from cryptography.fernet import Fernet
+    from app.config import get_settings
+    key = get_settings().secret_key
+    if not key:
+        raise ValueError("SECRET_KEY is not configured")
+    try:
+        return Fernet(key.encode())
+    except Exception:
+        derived = base64.urlsafe_b64encode(hashlib.sha256(key.encode()).digest())
+        return Fernet(derived)
+
+
+def _encrypt_default_key(api_key: str) -> str:
+    return _get_fernet().encrypt(api_key.encode()).decode()
+
+
+def _decrypt_default_key(encrypted: str) -> str:
+    return _get_fernet().decrypt(encrypted.encode()).decode()
+
+
+def _get_raw_default_keys(row: AppSettings) -> dict[str, str]:
+    """Return {model: encrypted_key} from the settings row."""
+    raw = getattr(row, "default_api_keys_json", None) or "{}"
+    try:
+        parsed = json.loads(raw)
+        if isinstance(parsed, dict):
+            return parsed
+    except Exception:
+        pass
+    return {}
+
+
+# ---------------------------------------------------------------------------
 def _parse_model_options(raw: str | None) -> list[ModelOption]:
     if not raw:
         return []
@@ -301,7 +344,11 @@ async def get_app_settings(db: AsyncSession) -> AppSettingsResponse:
     )
 
 
-async def update_app_settings(db: AsyncSession, allowed_models: list[str]) -> AppSettingsResponse:
+async def update_app_settings(
+    db: AsyncSession,
+    allowed_models: list[str],
+    credits_per_process: int | None = None,
+) -> AppSettingsResponse:
     row = await _get_or_create_settings_row(db)
     available_models = await _ensure_model_catalog(db, row)
 
@@ -314,6 +361,8 @@ async def update_app_settings(db: AsyncSession, allowed_models: list[str]) -> Ap
         raise HTTPException(status_code=400, detail="At least one model must be enabled")
 
     row.allowed_models_json = json.dumps(normalized)
+    if credits_per_process is not None and credits_per_process >= 0:
+        row.credits_per_process = max(0, credits_per_process)
     await db.commit()
     await db.refresh(row)
     return await get_app_settings(db)
@@ -471,3 +520,52 @@ async def update_prompt_config(db: AsyncSession, key: str, value: str) -> Prompt
     await db.commit()
     await db.refresh(row)
     return row
+
+
+# ---------------------------------------------------------------------------
+# Default API key management (per model, stored encrypted in AppSettings)
+# ---------------------------------------------------------------------------
+
+async def get_default_api_keys_map(db: AsyncSession) -> dict[str, str]:
+    """Return {model: decrypted_key} for all models with a default key configured."""
+    row = await _get_or_create_settings_row(db)
+    raw_map = _get_raw_default_keys(row)
+    result: dict[str, str] = {}
+    for model_key, enc_key in raw_map.items():
+        try:
+            result[model_key] = _decrypt_default_key(enc_key)
+        except Exception:
+            logger.warning("Failed to decrypt default API key for model %s", model_key)
+    return result
+
+
+async def set_default_api_key(db: AsyncSession, *, model: str, api_key: str) -> AppSettingsResponse:
+    """Store an encrypted default API key for the given model."""
+    row = await _get_or_create_settings_row(db)
+    keys_map = _get_raw_default_keys(row)
+    model_key = normalize_model_name(model)
+    if not model_key:
+        raise HTTPException(status_code=400, detail="Model identifier is required")
+    if not api_key or not api_key.strip():
+        raise HTTPException(status_code=400, detail="API key cannot be empty")
+    keys_map[model_key] = _encrypt_default_key(api_key.strip())
+    row.default_api_keys_json = json.dumps(keys_map)
+    await db.commit()
+    return await get_app_settings(db)
+
+
+async def delete_default_api_key(db: AsyncSession, *, model: str) -> AppSettingsResponse:
+    """Remove the default API key for the given model."""
+    row = await _get_or_create_settings_row(db)
+    keys_map = _get_raw_default_keys(row)
+    model_key = normalize_model_name(model)
+    keys_map.pop(model_key, None)
+    row.default_api_keys_json = json.dumps(keys_map)
+    await db.commit()
+    return await get_app_settings(db)
+
+
+async def get_credits_per_process(db: AsyncSession) -> int:
+    """Return the currently configured credits consumed per agent LLM call."""
+    row = await _get_or_create_settings_row(db)
+    return max(0, getattr(row, "credits_per_process", 1) or 1)

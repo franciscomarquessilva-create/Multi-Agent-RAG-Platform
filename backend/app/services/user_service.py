@@ -79,3 +79,14 @@ async def deduct_credits(db: AsyncSession, user: User, amount: int) -> None:
         )
     user.credits -= amount
     await db.commit()
+
+
+async def deduct_credits_soft(db: AsyncSession, user_id: str, amount: int) -> None:
+    """Deduct credits from user without raising. Clamps to zero. Skips admin users."""
+    from app.models.user import User as UserModel
+    result = await db.execute(select(UserModel).where(UserModel.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user or user.role == "admin":
+        return
+    user.credits = max(0, user.credits - amount)
+    await db.commit()

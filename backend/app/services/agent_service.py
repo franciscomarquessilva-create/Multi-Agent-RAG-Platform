@@ -102,7 +102,7 @@ async def create_agent(db: AsyncSession, data: AgentCreate, owner_id: str | None
     agent = Agent(
         name=data.name,
         model=normalized_model,
-        api_key_encrypted=encrypt_api_key(data.api_key),
+        api_key_encrypted=encrypt_api_key(data.api_key) if not data.use_default_key else encrypt_api_key(""),
         agent_type=agent_type,
         purpose=data.purpose,
         instructions=data.instructions,
@@ -110,6 +110,7 @@ async def create_agent(db: AsyncSession, data: AgentCreate, owner_id: str | None
         is_orchestrator=(agent_type == "orchestrator"),
         owner_id=owner_id,
     )
+    agent.use_default_key = data.use_default_key
     agent.allowed_slave_ids = data.allowed_slave_ids if agent_type == "orchestrator" else []
     agent.orchestration_rules = [r.model_dump() for r in data.orchestration_rules] if agent_type == "orchestrator" else []
     db.add(agent)
@@ -156,9 +157,16 @@ async def update_agent(db: AsyncSession, agent_id: str, data: AgentUpdate) -> Ag
     if data.api_key is not None:
         agent.api_key_encrypted = encrypt_api_key(data.api_key)
 
+    if data.use_default_key is not None:
+        agent.use_default_key = data.use_default_key
+        if data.use_default_key:
+            # When switching to default key, clear stored key
+            agent.api_key_encrypted = encrypt_api_key("")
+
     if not (agent.model or "").strip():
         raise HTTPException(status_code=400, detail="model is required")
-    if not (agent.api_key_encrypted or "").strip():
+    # Require api_key only when not using default key
+    if not agent.use_default_key and not (agent.api_key_encrypted or "").strip():
         raise HTTPException(status_code=400, detail="api_key is required")
 
     next_type = _validate_agent_type(data.agent_type) if data.agent_type is not None else agent.agent_type

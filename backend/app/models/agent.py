@@ -21,6 +21,7 @@ class Agent(Base):
     allowed_slave_ids_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
     orchestration_rules_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
     is_orchestrator: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    use_default_key: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
 
     @property

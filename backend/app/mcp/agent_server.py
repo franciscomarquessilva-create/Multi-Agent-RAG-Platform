@@ -16,12 +16,25 @@ logger = logging.getLogger(__name__)
 class AgentMCPServer:
     """Represents an MCP server for a single agent."""
 
-    def __init__(self, agent_id: str, agent_name: str, model: str, api_key: str, session_id: str | None = None):
+    def __init__(
+        self,
+        agent_id: str,
+        agent_name: str,
+        model: str,
+        api_key: str,
+        session_id: str | None = None,
+        owner_id: str | None = None,
+        use_default_key: bool = False,
+        credits_per_process: int = 1,
+    ):
         self.agent_id = agent_id
         self.agent_name = agent_name
         self.model = model
         self.api_key = api_key
         self.session_id = session_id
+        self.owner_id = owner_id
+        self.use_default_key = use_default_key
+        self.credits_per_process = credits_per_process
 
     def search_memory(self, query: str, n_results: int = 5) -> List[str]:
         """Retrieve relevant past interactions."""
@@ -54,11 +67,23 @@ class AgentMCPServer:
         except Exception:
             logger.exception("Failed to persist LLM log for agent %s", self.agent_id)
 
+    async def _deduct_credits(self) -> None:
+        """Deduct credits for this LLM call if the agent uses the default key."""
+        if not self.owner_id or not self.use_default_key or self.credits_per_process <= 0:
+            return
+        try:
+            from app.services.user_service import deduct_credits_soft
+            async with AsyncSessionLocal() as session:
+                await deduct_credits_soft(session, self.owner_id, self.credits_per_process)
+        except Exception:
+            logger.exception("Failed to deduct credits for user %s", self.owner_id)
+
     async def generate_response(self, messages: List[Dict[str, str]]) -> str:
         """Generate a non-streaming response."""
         try:
             response_text = await complete(self.model, self.api_key, messages)
             await self._log_llm_call(messages=messages, response_text=response_text)
+            await self._deduct_credits()
             return response_text
         except Exception as exc:
             await self._log_llm_call(messages=messages, error=str(exc))
@@ -72,6 +97,7 @@ class AgentMCPServer:
                 full_response += chunk
                 yield chunk
             await self._log_llm_call(messages=messages, response_text=full_response)
+            await self._deduct_credits()
         except Exception as exc:
             await self._log_llm_call(messages=messages, response_text=full_response or None, error=str(exc))
             raise

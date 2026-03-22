@@ -1,4 +1,5 @@
 from pydantic import BaseModel, Field
+from typing import Optional
 
 
 class ModelOption(BaseModel):
@@ -23,10 +24,13 @@ class ModelOptionUpdate(BaseModel):
 class AppSettingsResponse(BaseModel):
     allowed_models: list[str] = Field(default_factory=list)
     available_models: list[ModelOption] = Field(default_factory=list)
+    credits_per_process: int = 1
+    default_key_models: list[str] = Field(default_factory=list)
 
 
 class AppSettingsUpdate(BaseModel):
     allowed_models: list[str] = Field(default_factory=list)
+    credits_per_process: Optional[int] = None
 
 
 class PromptConfigItem(BaseModel):
@@ -39,3 +43,8 @@ class PromptConfigItem(BaseModel):
 
 class PromptConfigUpdate(BaseModel):
     value: str
+
+
+class DefaultKeyUpdate(BaseModel):
+    model: str
+    api_key: str
